@@ -80,12 +80,13 @@ def main():
         running = 0.0
         pbar = tqdm(dl, desc=f'Epoch {epoch}')
         for batch in pbar:
-            feats_a = batch['a_feats'].to(device)
-            coords_a = batch['a_coords'].to(device)
+
+            feats_a = batch['a_feats'].to(device).float()
+            coords_a = batch['a_coords'].to(device).float()
             mask_a = batch['a_mask'].to(device)
 
-            feats_o = batch['o_feats'].to(device)
-            coords_o = batch['o_coords'].to(device)
+            feats_o = batch['o_feats'].to(device).float()
+            coords_o = batch['o_coords'].to(device).float()
             mask_o = batch['o_mask'].to(device)
 
             labels = batch['labels'].to(device)
@@ -97,6 +98,10 @@ def main():
 
             opt.zero_grad()
             loss.backward()
+            # 梯度检查：输出所有梯度全为0的参数名
+            for name, param in model.named_parameters():
+                if param.grad is not None and (param.grad == 0).all():
+                    print(f"Warning: {name} grad is all zero!")
             opt.step()
 
             running += loss.item()
