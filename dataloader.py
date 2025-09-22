@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Callable, Dict
 import torch
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from rdkit import Chem
 from rdkit.Chem.rdchem import Atom
 from tqdm import tqdm
@@ -162,6 +162,27 @@ def get_dataloader(data_dir: str,
                       num_workers=num_workers,
                       collate_fn=_collate_fn)
 
+def get_dataloader_ddp(data_dir: str,
+                   batch_size: int = 32,
+                   num_workers: int = 4,
+                   max_neg: Optional[int] = None,
+                   feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                   rank: Optional[int] = None,            # DDP
+                   world_size: Optional[int] = None,     # DDP
+                   sampler = None
+                   ) -> DataLoader:
+    ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn)
+    if sampler == 'distributed':
+        assert rank is not None and world_size is not None, "rank and world_size must be provided for distributed sampler"
+        data_sampler = DistributedSampler(ds, num_replicas=world_size, rank=rank, shuffle=True)
+        dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, sampler=data_sampler, pin_memory=True, drop_last=True)
+        dl.sampler = data_sampler  # 方便外部 set_epoch
+    else:
+        return DataLoader(ds,
+                      batch_size=batch_size,
+                      shuffle=True,
+                      num_workers=num_workers,
+                      collate_fn=_collate_fn)
 
 # ------------------------------------------------------------------ #
 def _collate_fn(batch):
