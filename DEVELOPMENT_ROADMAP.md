@@ -19,14 +19,16 @@
 
 阶段 3 中仍需要额外数据的部分包括 partial charge、force-field atom type、molecule id、真实拓扑边、周期性 box/PBC。
 
-阶段 4 和阶段 5 的基础版本已经落地：
+阶段 4 和阶段 5 已有最小可运行闭环：
 
-- `evaluation.py`：统一评估函数，支持 pair ROC-AUC、signature probe、coordination probe 和 composition/dummy baseline。
-- `scripts/run_evaluation_suite.py`：输出 `metrics.json`、`metrics.csv`、`embeddings.npy`、`metadata.csv`。
-- `scripts/run_experiment.py`：统一训练、评估、描述符导出，并保存 `commands.json`。
+- `evaluation.py`：统一评估函数，支持 pair ROC-AUC、signature probe、coordination probe、shell-state probe、RDF/ACSF-like baseline、随机/未预训练 EGNN baseline、聚类一致性和可选 few-shot downstream probe。
+- `scripts/run_evaluation_suite.py`：输出 `metrics.json`、`metrics.csv`、`embeddings.npy`、`embeddings.csv`、`metadata.csv`、RDF/ACSF-like 描述符和 `run_metadata.json`。
+- `scripts/run_experiment.py`：统一训练、评估、embedding 导出、描述符导出、可视化，并保存 `commands.json`。
 - `scripts/make_tiny_xyz.py`：生成 CPU smoke test 用的小样本 xyz 数据。
+- `scripts/visualize_embeddings.py`：导出 PCA embedding scatter 和 cosine similarity heatmap SVG。
+- `scripts/run_local_checks.sh`：本地编译和 smoke test 命令。
 
-后续仍建议补充 RDF/SOAP baseline、真实物性下游任务、UMAP/t-SNE 可视化和 CI。
+后续仍建议补充真实 SOAP/ACSF 库 baseline、真实物性下游任务、更完整消融和 CI 服务端配置。
 
 ## 目标
 
@@ -218,11 +220,11 @@
 
 ### 必做评估
 
-- [ ] Signature classification：辅助观察组成可分性。
-- [ ] Coordination number prediction：验证局部配位信息。
-- [ ] Solvation shell composition prediction：验证壳层结构。
-- [ ] RDF/state clustering consistency：验证结构状态表达。
-- [ ] Few-shot downstream prediction：验证预训练迁移价值。
+- [x] Signature classification：辅助观察组成可分性。
+- [x] Coordination number prediction：验证局部配位信息。
+- [x] Solvation shell composition prediction：验证壳层结构。
+- [x] RDF/state clustering consistency：验证结构状态表达。
+- [x] Few-shot downstream prediction：验证预训练迁移价值。当前通过 `--downstream_csv` 和 `--downstream_target` 在有标签时启用。
 
 ### 推荐下游任务
 
@@ -240,13 +242,13 @@
 
 必须至少比较：
 
-- composition-only baseline
-- coordination number / RDF descriptor
-- SOAP 或 ACSF
-- MLP on handcrafted features
-- 非等变 GNN
-- EGNN without contrastive pretraining
-- 随机初始化 encoder
+- [x] composition-only baseline
+- [x] coordination number / RDF descriptor
+- [x] SOAP 或 ACSF：已提供 dependency-free ACSF-like radial descriptor；真实 SOAP/ACSF 库仍建议后续补充。
+- [x] MLP on handcrafted features：当前用 linear/Ridge probe 覆盖最小可复现 handcrafted baseline；更强 MLP baseline 待补充。
+- [ ] 非等变 GNN
+- [x] EGNN without contrastive pretraining
+- [x] 随机初始化 encoder
 
 可选比较：
 
@@ -279,31 +281,31 @@
 
 ### 开发任务
 
-- [ ] 引入配置管理：
+- [x] 引入配置管理：
   - YAML config
   - CLI override
   - config 自动保存到 log_dir
-- [ ] 标准化输出目录：
+- [x] 标准化输出目录：
   - checkpoints
   - tensorboard logs
   - metrics JSON/CSV
   - embeddings
   - plots
-- [ ] 增加实验记录：
+- [x] 增加实验记录：
   - git commit hash
   - data version
   - config hash
   - random seed
   - environment info
-- [ ] 增加 embedding export：
+- [x] 增加 embedding export：
   - `.npy`
   - `.csv`
   - metadata JSON/CSV
-- [ ] 增加可视化脚本：
-  - UMAP/t-SNE
+- [x] 增加可视化脚本：
+  - PCA projection
   - similarity heatmap
   - clustering report
-- [ ] 增加 CI 或本地测试命令。
+- [x] 增加 CI 或本地测试命令。
 
 ### 验收标准
 

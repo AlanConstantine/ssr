@@ -31,7 +31,9 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 - `scripts/export_embeddings.py`：导出 embedding 和 metadata。
 - `scripts/compute_physical_descriptors.py`：从 xyz 导出配位数和 Li 距离统计。
 - `scripts/run_evaluation_suite.py`：运行 pair ROC、signature probe、coordination probe 和 baseline 对比。
-- `scripts/run_experiment.py`：统一训练、评估、描述符导出和命令记录。
+- `scripts/run_experiment.py`：统一训练、评估、embedding 导出、描述符导出、可视化和命令记录。
+- `scripts/visualize_embeddings.py`：导出 PCA embedding scatter 和 similarity heatmap SVG。
+- `scripts/run_local_checks.sh`：本地编译和 smoke test 命令。
 - `scripts/make_tiny_xyz.py`：生成 CPU smoke test 用的小样本 xyz 数据。
 - `tests/test_smoke.py`：最小 smoke tests。
 - `ratio_embedding/ratio_data_generation.ipynb`：ratio embedding 数据生成实验 notebook。
@@ -159,6 +161,11 @@ python eval.py \
 - composition-only signature baseline
 - SSR embedding 的 coordination number regression probe
 - composition-only coordination baseline
+- RDF descriptor 和 ACSF-like radial descriptor baseline
+- random / untrained EGNN encoder baseline
+- solvation shell state classification
+- RDF/state clustering consistency
+- 可选 few-shot downstream probe
 - dummy baseline
 
 ```bash
@@ -171,12 +178,32 @@ python scripts/run_evaluation_suite.py \
   --center_on_li
 ```
 
+如果有下游标签 CSV，可额外传入：
+
+```bash
+python scripts/run_evaluation_suite.py \
+  --data_dir /path/to/xyz_data \
+  --ckpt ./runs/ssr_exp1/checkpoints/best.pt \
+  --out_dir ./runs/ssr_exp1/metrics \
+  --downstream_csv ./labels.csv \
+  --downstream_target conductivity \
+  --device cpu \
+  --feature_mode element_shell \
+  --center_on_li
+```
+
+下游 CSV 可用 `path`、`filename` 或 `signature` 匹配样本。
+
 输出：
 
 - `metrics.json`
 - `metrics.csv`
 - `embeddings.npy`
+- `embeddings.csv`
 - `metadata.csv`
+- `rdf_descriptors.npy`
+- `acsf_like_descriptors.npy`
+- `run_metadata.json`
 
 ## 端到端实验
 
@@ -199,8 +226,16 @@ python scripts/run_experiment.py \
   --log_dir ./runs/tiny_cpu \
   --epochs 1 \
   --batch_size 2 \
-  --device cpu
+  --device cpu \
+  --num_workers 0
 ```
+
+标准输出目录：
+
+- `checkpoints/`：`best.pt`、`config.json`、`env.json`
+- `metrics/`：机器可读评估指标、metadata、RDF/ACSF-like 描述符
+- `embeddings/`：独立 embedding `.npy` / `.csv` 和 metadata
+- `plots/`：PCA scatter SVG 和 cosine similarity heatmap SVG
 
 ## 导出 Embedding
 
@@ -217,6 +252,8 @@ python scripts/export_embeddings.py \
 
 - `embeddings.npy`
 - `metadata.csv`
+- `embeddings.csv`
+- `metadata.json`
 
 ## 物理描述符
 
@@ -250,7 +287,14 @@ python scripts/compute_physical_descriptors.py \
 ## 测试
 
 ```bash
+python -m py_compile *.py scripts/*.py
 python -m pytest tests/test_smoke.py -q
+```
+
+或：
+
+```bash
+scripts/run_local_checks.sh
 ```
 
 ## 当前限制
@@ -259,7 +303,7 @@ python -m pytest tests/test_smoke.py -q
 - `pair` mode 中正负样本仍由 signature 定义，可能更偏向组成分类。
 - 已加入 xyz 可计算的 Li 壳层特征；周期性边界条件、分子身份、部分电荷、显式拓扑边仍需要额外数据。
 - 已有最小 smoke tests，但仍缺少完整单元测试和真实数据回归测试。
-- 需要与 RDF、coordination number、SOAP、SchNet/DimeNet/PaiNN 等 baseline 做系统比较。
+- 已有 RDF、coordination number、ACSF-like radial descriptor、composition baseline；真实 SOAP、非等变 GNN、SchNet/DimeNet/PaiNN 等 baseline 仍待补充。
 
 ## 建议下一步
 

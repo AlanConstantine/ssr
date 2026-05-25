@@ -12,6 +12,7 @@ import torch
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from evaluation import EvalConfig, run_evaluation_suite
+from utils import config_hash, env_info, git_commit_hash
 
 
 def parse_args():
@@ -27,6 +28,10 @@ def parse_args():
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
+    parser.add_argument('--rdf_bins', type=int, default=12)
+    parser.add_argument('--rdf_max_distance', type=float, default=6.0)
+    parser.add_argument('--downstream_csv', default=None)
+    parser.add_argument('--downstream_target', default=None)
     parser.add_argument('--device', default='auto')
     return parser.parse_args()
 
@@ -47,8 +52,22 @@ def main():
         li_cutoff=args.li_cutoff,
         center_on_li=args.center_on_li,
         shell_radius=args.shell_radius,
+        rdf_bins=args.rdf_bins,
+        rdf_max_distance=args.rdf_max_distance,
+        downstream_csv=args.downstream_csv,
+        downstream_target=args.downstream_target,
     )
     result = run_evaluation_suite(cfg, device)
+    config_payload = vars(args).copy()
+    metadata_payload = {
+        'git_commit': git_commit_hash(),
+        'config_hash': config_hash(config_payload),
+        'config': config_payload,
+        'environment': env_info(),
+        'downstream': result.get('downstream', {}),
+    }
+    with open(out_dir / 'run_metadata.json', 'w') as f:
+        json.dump(metadata_payload, f, indent=2, sort_keys=True)
     with open(out_dir / 'metrics.json', 'w') as f:
         json.dump(result['metrics'], f, indent=2, sort_keys=True)
     with open(out_dir / 'metrics.csv', 'w', newline='') as f:
@@ -59,8 +78,23 @@ def main():
     meta = result['metadata']
     with open(out_dir / 'metadata.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['path', 'signature', 'coordination_number'])
-        writer.writerows(zip(meta['paths'], meta['signatures'], meta['coordination']))
+        writer.writerow(['path', 'signature', 'coordination_number', 'shell_state'])
+        writer.writerows(zip(meta['paths'], meta['signatures'], meta['coordination'], meta['shell_state']))
+    with open(out_dir / 'embeddings.csv', 'w', newline='') as f:
+        writer = csv.writer(f)
+        dim = result['embeddings'].shape[1]
+        writer.writerow(['path', 'signature'] + [f'z{i}' for i in range(dim)])
+        for path, signature, row in zip(meta['paths'], meta['signatures'], result['embeddings']):
+            writer.writerow([path, signature] + [float(value) for value in row])
+    np.save(out_dir / 'rdf_descriptors.npy', meta['rdf'])
+    np.save(out_dir / 'acsf_like_descriptors.npy', meta['acsf_like'])
+    with open(out_dir / 'descriptor_keys.json', 'w') as f:
+        json.dump({
+            'composition_keys': meta['composition_keys'],
+            'shell_composition_keys': meta['shell_composition_keys'],
+            'rdf_bins': args.rdf_bins,
+            'rdf_max_distance': args.rdf_max_distance,
+        }, f, indent=2, sort_keys=True)
 
 
 if __name__ == '__main__':

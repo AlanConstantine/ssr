@@ -12,9 +12,9 @@ The preferred default path is SimCLR-style self-supervision: two augmented views
 - Stage 1A is implemented: same-structure augmented views, `SimCLRDataset`, and standard SimCLR / NT-Xent loss.
 - Stage 2 basics are implemented: `pair` and `simclr` modes plus `nt_xent`, `simclr`, `bce_similarity`, and `triplet_margin` losses.
 - Stage 3 xyz-derived physical features are partially implemented: `element_shell`, Li-centering, optional Li shell cropping, and physical descriptor export.
-- Stage 4/5 foundation is present: evaluation suite, embedding export, physical descriptor export, tiny xyz generation, and an end-to-end experiment runner.
+- Stage 4/5 has a minimal runnable loop: evaluation suite, RDF/ACSF-like baselines, random/untrained EGNN baselines, shell-state probes, optional few-shot downstream probes, embedding export, physical descriptor export, SVG visualizations, tiny xyz generation, and an end-to-end experiment runner.
 
-Planned but not complete: temporal positives, physical descriptor based positives, hard negative mining, RDF/SOAP baselines, real downstream property tasks, visualization, and CI.
+Planned but not complete: temporal positives, physical descriptor based positives, hard negative mining, real SOAP/ACSF library baselines, non-equivariant GNN baselines, EGNN no-pretraining/random baselines, real downstream property tasks, and service-side CI.
 
 ## Important Files
 
@@ -32,6 +32,8 @@ Planned but not complete: temporal positives, physical descriptor based positive
 - `scripts/run_evaluation_suite.py`: metrics, embeddings, and metadata export.
 - `scripts/export_embeddings.py`: checkpoint embedding export.
 - `scripts/compute_physical_descriptors.py`: xyz physical descriptor export.
+- `scripts/visualize_embeddings.py`: PCA scatter and cosine similarity heatmap SVG export.
+- `scripts/run_local_checks.sh`: local compile and smoke test command.
 - `scripts/make_tiny_xyz.py`: small CPU test dataset generator.
 - `tests/test_smoke.py`: minimal regression coverage.
 
@@ -46,7 +48,7 @@ pip install -r requirements.txt
 Run smoke tests:
 
 ```bash
-pytest tests/test_smoke.py
+python -m pytest tests/test_smoke.py
 ```
 
 Compile-check Python files:
@@ -69,7 +71,14 @@ python scripts/run_experiment.py \
   --log_dir ./runs/tiny_cpu \
   --epochs 1 \
   --batch_size 2 \
-  --device cpu
+  --device cpu \
+  --num_workers 0
+```
+
+Run local checks:
+
+```bash
+scripts/run_local_checks.sh
 ```
 
 ## Coding Guidelines
@@ -98,6 +107,11 @@ The pair ROC-AUC metric is useful for compatibility, but it can reward compositi
 - composition-only signature baseline
 - coordination-number regression probe
 - composition-only coordination baseline
+- shell-state classification
+- RDF and ACSF-like descriptor baselines
+- random/untrained EGNN encoder baselines
+- embedding/RDF clustering consistency
+- optional few-shot downstream probes from `--downstream_csv` and `--downstream_target`
 - dummy baselines
 
 The long-term goal is an embedding that reflects local solvation geometry and physical state, not only composition signature.

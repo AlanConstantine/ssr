@@ -259,6 +259,7 @@ class EGNN(nn.Module):
                 ranking.masked_fill_(self_mask, -1.)
                 ranking.masked_fill_(adj_mat, 0.)
 
+            num_nearest = min(num_nearest, n)
             nbhd_ranking, nbhd_indices = ranking.topk(num_nearest, dim = -1, largest = False)
 
             nbhd_mask = nbhd_ranking <= valid_radius

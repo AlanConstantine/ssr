@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -108,3 +109,21 @@ def env_info() -> dict[str, Any]:
 def save_env_info(log_dir: Path) -> None:
     with open(log_dir / 'env.json', 'w') as f:
         json.dump(env_info(), f, indent=2, sort_keys=True)
+
+
+def git_commit_hash() -> str | None:
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def config_hash(config: dict[str, Any]) -> str:
+    import hashlib
+
+    payload = json.dumps(config, sort_keys=True, default=str).encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()[:12]

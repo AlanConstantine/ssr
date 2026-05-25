@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -13,7 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from dataloader import ContrastiveDataset, _collate_fn
 from model import SolvContrastive, SolvEncoder
 from physics import PhysicalFeatureConfig, feature_dim_for_mode
-from utils import load_model_state, set_seed
+from utils import config_hash, git_commit_hash, load_model_state, set_seed
 
 
 def parse_args():
@@ -50,7 +51,7 @@ def main():
     )
     dataset = ContrastiveDataset(Path(args.data_dir), physical_config=physical_config, pair_list=[])
     loader = torch.utils.data.DataLoader(
-        [(dataset.paths[i], dataset.signatures[i]) for i in range(len(dataset.paths))],
+        list(range(len(dataset.paths))),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0,
@@ -66,8 +67,10 @@ def main():
     embeddings = []
     metadata = []
     with torch.no_grad():
-        for paths, signatures in loader:
+        for indices in loader:
             batch_structs = []
+            paths = [dataset.paths[int(idx)] for idx in indices]
+            signatures = [dataset.signatures[int(idx)] for idx in indices]
             for path in paths:
                 from dataloader import SolvationStructure
                 batch_structs.append(SolvationStructure(Path(path), physical_config=physical_config))
@@ -85,6 +88,20 @@ def main():
         writer = csv.writer(f)
         writer.writerow(['path', 'signature'])
         writer.writerows(metadata)
+    with open(out_dir / 'embeddings.csv', 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['path', 'signature'] + [f'z{i}' for i in range(arr.shape[1])])
+        for (path, signature), row in zip(metadata, arr):
+            writer.writerow([path, signature] + [float(value) for value in row])
+    export_config = vars(args).copy()
+    with open(out_dir / 'metadata.json', 'w') as f:
+        json.dump({
+            'git_commit': git_commit_hash(),
+            'config_hash': config_hash(export_config),
+            'config': export_config,
+            'num_samples': int(arr.shape[0]),
+            'embedding_dim': int(arr.shape[1]),
+        }, f, indent=2, sort_keys=True)
 
 
 if __name__ == '__main__':

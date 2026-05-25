@@ -8,6 +8,7 @@ torch = pytest.importorskip("torch")
 
 from augment import AugmentConfig, augment_structure
 from dataloader import build_fixed_pair_list, get_dataloader
+from evaluation import acsf_like_descriptor, rdf_descriptor, shell_composition
 from model import SolvContrastive, SolvEncoder, simclr_nt_xent
 from physics import PhysicalFeatureConfig, append_shell_features, feature_dim_for_mode
 
@@ -30,12 +31,12 @@ def test_pair_and_simclr_dataloaders(tmp_path):
     write_xyz(tmp_path / "Frame2_Li_1EC_id2.xyz", "Li_1EC")
 
     pair_list = build_fixed_pair_list(str(tmp_path), max_pairs_per_anchor=1, seed=7)
-    pair_dl = get_dataloader(str(tmp_path), batch_size=2, mode="pair", pair_list=pair_list)
+    pair_dl = get_dataloader(str(tmp_path), batch_size=2, mode="pair", pair_list=pair_list, num_workers=0)
     pair_batch = next(iter(pair_dl))
     assert pair_batch["a_feats"].shape[-1] == 10
     assert "labels" in pair_batch
 
-    simclr_dl = get_dataloader(str(tmp_path), batch_size=2, mode="simclr")
+    simclr_dl = get_dataloader(str(tmp_path), batch_size=2, mode="simclr", num_workers=0)
     simclr_batch = next(iter(simclr_dl))
     assert simclr_batch["view1_feats"].shape[-1] == 10
     assert simclr_batch["view2_coords"].shape[-1] == 3
@@ -44,6 +45,7 @@ def test_pair_and_simclr_dataloaders(tmp_path):
         str(tmp_path),
         batch_size=2,
         mode="simclr",
+        num_workers=0,
         physical_config=PhysicalFeatureConfig(mode="element_shell", center_on_li=True),
     )
     shell_batch = next(iter(shell_dl))
@@ -82,3 +84,14 @@ def test_shell_feature_builder():
     assert out.shape == (3, 13)
     assert out[1, -1].item() == 1.0
     assert out[2, -1].item() == 0.0
+
+
+def test_stage4_descriptors(tmp_path):
+    path = tmp_path / "Frame0_Li_1EC_id0.xyz"
+    write_xyz(path, "Li_1EC")
+    from dataloader import SolvationStructure
+
+    struct = SolvationStructure(path)
+    assert shell_composition(struct, li_cutoff=2.5)["O"] == 1.0
+    assert rdf_descriptor(struct, bins=4, max_distance=4.0).shape == (4,)
+    assert acsf_like_descriptor(struct, bins=4, max_distance=4.0).shape[0] == 36
