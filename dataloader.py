@@ -11,17 +11,16 @@ label = 1 for positive, 0 for negative.
 """
 
 from __future__ import annotations
-import os
 import re
 import random
 from pathlib import Path
-from typing import List, Tuple, Optional, Callable, Dict
+from typing import List, Tuple, Optional, Callable, Dict, Sequence
 import torch
-import numpy as np
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from rdkit import Chem
 from rdkit.Chem.rdchem import Atom
-from tqdm import tqdm
+from augment import AugmentConfig, augment_structure
+from utils import seed_worker
 
 # ------------------------------------------------------------------ #
 # Helper: periodic table → one-hot index
@@ -61,19 +60,27 @@ class SolvationStructure:
         with open(self.path, 'r') as f:
             lines = [ln.strip() for ln in f.readlines()]
 
+        if len(lines) < 3:
+            raise ValueError(f'{self.path} is not a valid xyz file: expected header and atom rows')
+
         # 2nd line → signature
         self.signature = lines[1].split(':')[-1].split('.')[0].strip()
 
         # skip first two lines
         coords, symbols, feats = [], [], []
-        for ln in lines[2:]:
+        for line_no, ln in enumerate(lines[2:], start=3):
             if not ln:
                 continue
             parts = ln.split()
+            if len(parts) < 4:
+                raise ValueError(f'{self.path}:{line_no} has fewer than 4 columns')
             sym, x, y, z = parts[0], float(parts[1]), float(parts[2]), float(parts[3])
             symbols.append(sym)
             coords.append([x, y, z])
             feats.append(feat_fn(Chem.Atom(sym)))
+
+        if not coords:
+            raise ValueError(f'{self.path} contains no atoms')
 
         self.coords = torch.tensor(coords, dtype=torch.float32)
         self.symbols = symbols
@@ -89,11 +96,12 @@ class ContrastiveDataset(Dataset):
     def __init__(self,
                  data_dir: Path,
                  max_neg: Optional[int] = None,
-                 feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None):
-        self.data_dir = Path(data_dir)
-        self.paths = sorted(self.data_dir.glob('*.xyz'))
+                 feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                 pair_list: Optional[Sequence[Tuple[int, int, float]]] = None):
+        self.data_dir, self.paths = _discover_xyz_paths(data_dir)
         self.max_neg = max_neg
         self.feat_fn = feat_fn
+        self.pair_list = list(pair_list) if pair_list is not None else None
 
         # bucket by signature
         self.sig2idx: Dict[str, List[int]] = {}
@@ -102,6 +110,10 @@ class ContrastiveDataset(Dataset):
             self.sig2idx.setdefault(sig, []).append(idx)
 
         self.all_indices = list(range(len(self.paths)))
+        self.signatures = [self._signature_from_path(p) for p in self.paths]
+
+        if self.pair_list is None and len(self.sig2idx) < 2:
+            raise ValueError('contrastive training requires at least two different signatures')
 
     # -------------------------------------------------------------- #
     @staticmethod
@@ -122,8 +134,14 @@ class ContrastiveDataset(Dataset):
         """
         Returns (anchor, other, label)
         """
+        if self.pair_list is not None:
+            anchor_idx, other_idx, label_value = self.pair_list[idx]
+            anchor = SolvationStructure(self.paths[anchor_idx], self.feat_fn)
+            other = SolvationStructure(self.paths[other_idx], self.feat_fn)
+            return anchor, other, torch.tensor(float(label_value))
+
         anchor_path = self.paths[idx]
-        anchor_sig = self._signature_from_path(anchor_path)
+        anchor_sig = self.signatures[idx]
 
         # decide positive or negative
         if random.random() < 0.5:        # positive
@@ -135,10 +153,12 @@ class ContrastiveDataset(Dataset):
             label = torch.tensor(1.0)
         else:                            # negative
             candidates = [i for i in self.all_indices
-                          if self._signature_from_path(self.paths[i]) != anchor_sig]
+                          if self.signatures[i] != anchor_sig]
             if self.max_neg:
                 candidates = random.sample(candidates,
                                            min(len(candidates), self.max_neg))
+            if not candidates:
+                raise ValueError(f'no negative candidates found for signature {anchor_sig}')
             other_idx = random.choice(candidates)
             label = torch.tensor(0.0)
 
@@ -147,20 +167,128 @@ class ContrastiveDataset(Dataset):
 
         return anchor, other, label
 
+    def __len__(self) -> int:
+        if self.pair_list is not None:
+            return len(self.pair_list)
+        return len(self.paths)
+
+
+class SimCLRDataset(Dataset):
+    def __init__(
+        self,
+        data_dir: Path,
+        feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+        augment_config: Optional[AugmentConfig] = None,
+    ):
+        self.data_dir, self.paths = _discover_xyz_paths(data_dir)
+        self.feat_fn = feat_fn
+        self.augment_config = augment_config or AugmentConfig()
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __getitem__(self, idx: int) -> Tuple[SolvationStructure, SolvationStructure]:
+        struct = SolvationStructure(self.paths[idx], self.feat_fn)
+        coords_a, feats_a = augment_structure(struct.coords, struct.features, self.augment_config)
+        coords_b, feats_b = augment_structure(struct.coords, struct.features, self.augment_config)
+        view_a = _view_from_structure(struct, coords_a, feats_a)
+        view_b = _view_from_structure(struct, coords_b, feats_b)
+        return view_a, view_b
+
+
+def _discover_xyz_paths(data_dir: Path) -> tuple[Path, list[Path]]:
+    data_dir = Path(data_dir)
+    if not data_dir.exists():
+        raise FileNotFoundError(f'data_dir does not exist: {data_dir}')
+    paths = sorted(data_dir.glob('*.xyz'))
+    if not paths:
+        raise ValueError(f'no .xyz files found in {data_dir}')
+    return data_dir, paths
+
+
+def _view_from_structure(
+    struct: SolvationStructure,
+    coords: torch.Tensor,
+    feats: torch.Tensor,
+) -> SolvationStructure:
+    view = object.__new__(SolvationStructure)
+    view.path = struct.path
+    view.coords = coords
+    view.features = feats
+    view.signature = struct.signature
+    view.symbols = struct.symbols[:coords.size(0)]
+    return view
+
+
+def build_fixed_pair_list(
+    data_dir: str,
+    max_pairs_per_anchor: int = 2,
+    seed: int = 42,
+) -> list[tuple[int, int, float]]:
+    ds = ContrastiveDataset(Path(data_dir))
+    rng = random.Random(seed)
+    pairs: list[tuple[int, int, float]] = []
+    for idx, sig in enumerate(ds.signatures):
+        positives = [i for i in ds.sig2idx[sig] if i != idx]
+        negatives = [i for i in ds.all_indices if ds.signatures[i] != sig]
+        rng.shuffle(positives)
+        rng.shuffle(negatives)
+        for other_idx in positives[:max_pairs_per_anchor]:
+            pairs.append((idx, other_idx, 1.0))
+        for other_idx in negatives[:max_pairs_per_anchor]:
+            pairs.append((idx, other_idx, 0.0))
+    rng.shuffle(pairs)
+    return pairs
+
 
 # ------------------------------------------------------------------ #
 def get_dataloader(data_dir: str,
                    batch_size: int = 32,
                    num_workers: int = 4,
                    max_neg: Optional[int] = None,
-                   feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None
+                   feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                   mode: str = 'pair',
+                   augment_config: Optional[AugmentConfig] = None,
+                   pair_list: Optional[Sequence[Tuple[int, int, float]]] = None,
+                   sampler: Optional[str] = None,
+                   rank: Optional[int] = None,
+                   world_size: Optional[int] = None,
+                   drop_last: bool = False,
+                   seed: int = 42,
                    ) -> DataLoader:
-    ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn)
+    if mode == 'pair':
+        ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn, pair_list=pair_list)
+        collate_fn = _collate_fn
+    elif mode == 'simclr':
+        ds = SimCLRDataset(Path(data_dir), feat_fn=feat_fn, augment_config=augment_config)
+        collate_fn = _simclr_collate_fn
+    else:
+        raise ValueError(f'unsupported dataloader mode: {mode}')
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    if sampler == 'distributed':
+        if rank is None or world_size is None:
+            raise ValueError('rank and world_size must be provided for distributed sampler')
+        data_sampler = DistributedSampler(ds, num_replicas=world_size, rank=rank, shuffle=True)
+        return DataLoader(ds,
+                          batch_size=batch_size,
+                          sampler=data_sampler,
+                          num_workers=num_workers,
+                          collate_fn=collate_fn,
+                          pin_memory=torch.cuda.is_available(),
+                          drop_last=drop_last,
+                          worker_init_fn=seed_worker,
+                          generator=generator)
+
     return DataLoader(ds,
                       batch_size=batch_size,
                       shuffle=True,
                       num_workers=num_workers,
-                      collate_fn=_collate_fn)
+                      collate_fn=collate_fn,
+                      worker_init_fn=seed_worker,
+                      generator=generator)
 
 def get_dataloader_ddp(data_dir: str,
                    batch_size: int = 32,
@@ -169,20 +297,19 @@ def get_dataloader_ddp(data_dir: str,
                    feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
                    rank: Optional[int] = None,            # DDP
                    world_size: Optional[int] = None,     # DDP
-                   sampler = None
+                   sampler = None,
+                   mode: str = 'pair'
                    ) -> DataLoader:
-    ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn)
-    if sampler == 'distributed':
-        assert rank is not None and world_size is not None, "rank and world_size must be provided for distributed sampler"
-        data_sampler = DistributedSampler(ds, num_replicas=world_size, rank=rank, shuffle=True)
-        dl = DataLoader(ds, batch_size=batch_size, num_workers=num_workers, sampler=data_sampler, pin_memory=True, drop_last=True)
-        dl.sampler = data_sampler  # 方便外部 set_epoch
-    else:
-        return DataLoader(ds,
-                      batch_size=batch_size,
-                      shuffle=True,
-                      num_workers=num_workers,
-                      collate_fn=_collate_fn)
+    return get_dataloader(data_dir,
+                          batch_size=batch_size,
+                          num_workers=num_workers,
+                          max_neg=max_neg,
+                          feat_fn=feat_fn,
+                          sampler=sampler,
+                          rank=rank,
+                          world_size=world_size,
+                          drop_last=sampler == 'distributed',
+                          mode=mode)
 
 # ------------------------------------------------------------------ #
 def _collate_fn(batch):
@@ -214,6 +341,31 @@ def _collate_fn(batch):
         o_feats=o_feats,
         o_mask=o_mask,
         labels=torch.stack(labels)
+    )
+
+
+def _simclr_collate_fn(batch):
+    view_a, view_b = zip(*batch)
+
+    def pack(structs):
+        coords = [s.coords for s in structs]
+        feats = [s.features for s in structs]
+        lengths = torch.tensor([len(c) for c in coords])
+        coords = torch.nn.utils.rnn.pad_sequence(coords, batch_first=True)
+        feats = torch.nn.utils.rnn.pad_sequence(feats, batch_first=True)
+        mask = (torch.arange(coords.size(1)).unsqueeze(0) <
+                lengths.unsqueeze(1))
+        return coords, feats, mask
+
+    a_coords, a_feats, a_mask = pack(view_a)
+    b_coords, b_feats, b_mask = pack(view_b)
+    return dict(
+        view1_coords=a_coords,
+        view1_feats=a_feats,
+        view1_mask=a_mask,
+        view2_coords=b_coords,
+        view2_feats=b_feats,
+        view2_mask=b_mask,
     )
 
 

@@ -1,0 +1,16 @@
+mode: simclr
+loss: simclr
+batch_size: 32
+num_workers: 4
+lr: 0.0003
+epochs: 100
+patience: 10
+temperature: 0.1
+seed: 42
+feat_dim: 10
+dim: 128
+depth: 4
+num_nearest_neighbors: 12
+augment_noise_std: 0.01
+augment_translation_std: 0.0
+augment_atom_dropout: 0.0

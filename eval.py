@@ -8,12 +8,13 @@ Computes
 
 from __future__ import annotations
 import argparse
-from pathlib import Path
+import random
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
-from dataloader import get_dataloader
+from dataloader import build_fixed_pair_list, get_dataloader
 from model import SolvEncoder, SolvContrastive
+from utils import load_model_state
 
 # ------------------------------------------------------------------ #
 def parse_args():
@@ -21,24 +22,36 @@ def parse_args():
     parser.add_argument('--data_dir', required=True)
     parser.add_argument('--ckpt', required=True)
     parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', default='auto')
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--max_pairs_per_anchor', type=int, default=2)
     return parser.parse_args()
 
 
 # ------------------------------------------------------------------ #
 def main():
     args = parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
     device = torch.device(args.device if args.device != 'auto'
                           else ('cuda' if torch.cuda.is_available() else 'cpu'))
 
+    pair_list = build_fixed_pair_list(args.data_dir,
+                                      max_pairs_per_anchor=args.max_pairs_per_anchor,
+                                      seed=args.seed)
     dl = get_dataloader(args.data_dir,
                         batch_size=args.batch_size,
-                        num_workers=4,
-                        max_neg=None)   # use all negatives
+                        num_workers=args.num_workers,
+                        pair_list=pair_list,
+                        mode='pair',
+                        seed=args.seed)
 
-    encoder = SolvEncoder(num_tokens=64, dim=128, depth=4, num_nearest_neighbors=12)
-    model = SolvContrastive(encoder, proj_dim=128)
-    model.load_state_dict(torch.load(args.ckpt, map_location='cpu'))
+    encoder = SolvEncoder(feat_dim=10, dim=128, depth=4, num_nearest_neighbors=12)
+    model = SolvContrastive(encoder, dim=128, proj_dim=128)
+    model.load_state_dict(load_model_state(args.ckpt, map_location='cpu'))
     model.to(device)
     model.eval()
 
@@ -62,6 +75,9 @@ def main():
 
     sims = np.concatenate(sims)
     labels = np.concatenate(labels)
+
+    if not np.any(labels == 1) or not np.any(labels == 0):
+        raise ValueError('evaluation requires both positive and negative pairs')
 
     pos_sim = sims[labels == 1].mean()
     neg_sim = sims[labels == 0].mean()

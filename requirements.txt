@@ -1,0 +1,9 @@
+torch
+rdkit
+einops
+tqdm
+scikit-learn
+tensorboard
+numpy
+PyYAML
+pytest
