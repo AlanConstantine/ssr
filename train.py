@@ -13,14 +13,27 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm
 from augment import AugmentConfig
 from dataloader import get_dataloader
 from model import SolvEncoder, SolvContrastive, compute_contrastive_loss
+from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import attach_defaults, load_config, merge_config, save_checkpoint, save_config, save_env_info, set_seed
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module='torch')
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    class SummaryWriter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
 
 # ------------------------------------------------------------------ #
 def parse_args():
@@ -41,6 +54,11 @@ def parse_args():
     parser.add_argument('--temperature', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--feat_dim', type=int, default=10)
+    parser.add_argument('--feature_mode', default='element',
+                        choices=['element', 'element_shell'])
+    parser.add_argument('--li_cutoff', type=float, default=2.5)
+    parser.add_argument('--center_on_li', action='store_true')
+    parser.add_argument('--shell_radius', type=float, default=None)
     parser.add_argument('--dim', type=int, default=128)
     parser.add_argument('--depth', type=int, default=4)
     parser.add_argument('--num_nearest_neighbors', type=int, default=12)
@@ -89,11 +107,18 @@ def main():
         translation_std=args.augment_translation_std,
         atom_dropout=args.augment_atom_dropout,
     )
+    physical_config = PhysicalFeatureConfig(
+        mode=args.feature_mode,
+        li_cutoff=args.li_cutoff,
+        center_on_li=args.center_on_li,
+        shell_radius=args.shell_radius,
+    )
     dl = get_dataloader(args.data_dir,
                         batch_size=args.batch_size,
                         num_workers=args.num_workers,
                         mode=args.mode,
                         augment_config=augment_config,
+                        physical_config=physical_config,
                         sampler='distributed' if distributed else None,
                         rank=dist.get_rank() if distributed else None,
                         world_size=dist.get_world_size() if distributed else None,
@@ -101,7 +126,8 @@ def main():
                         seed=args.seed)
     # ---------------------------------------------------------------- #
     # Model
-    encoder = SolvEncoder(feat_dim=args.feat_dim,
+    model_feat_dim = feature_dim_for_mode(args.feat_dim, args.feature_mode)
+    encoder = SolvEncoder(feat_dim=model_feat_dim,
                           dim=args.dim,
                           depth=args.depth,
                           num_nearest_neighbors=args.num_nearest_neighbors)

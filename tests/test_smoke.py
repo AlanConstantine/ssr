@@ -9,6 +9,7 @@ torch = pytest.importorskip("torch")
 from augment import AugmentConfig, augment_structure
 from dataloader import build_fixed_pair_list, get_dataloader
 from model import SolvContrastive, SolvEncoder, simclr_nt_xent
+from physics import PhysicalFeatureConfig, append_shell_features, feature_dim_for_mode
 
 
 def write_xyz(path: Path, signature: str) -> None:
@@ -39,6 +40,15 @@ def test_pair_and_simclr_dataloaders(tmp_path):
     assert simclr_batch["view1_feats"].shape[-1] == 10
     assert simclr_batch["view2_coords"].shape[-1] == 3
 
+    shell_dl = get_dataloader(
+        str(tmp_path),
+        batch_size=2,
+        mode="simclr",
+        physical_config=PhysicalFeatureConfig(mode="element_shell", center_on_li=True),
+    )
+    shell_batch = next(iter(shell_dl))
+    assert shell_batch["view1_feats"].shape[-1] == feature_dim_for_mode(10, "element_shell")
+
 
 def test_model_and_simclr_loss():
     encoder = SolvEncoder(feat_dim=10, dim=16, depth=1, num_nearest_neighbors=2)
@@ -63,3 +73,12 @@ def test_augment_keeps_feature_alignment():
     assert out_coords.size(0) == out_feats.size(0)
     assert out_coords.size(1) == 3
     assert out_feats.size(1) == 10
+
+
+def test_shell_feature_builder():
+    coords = torch.tensor([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
+    feats = torch.eye(10)[:3]
+    out = append_shell_features(feats, coords, ["Li", "O", "C"], li_cutoff=2.5)
+    assert out.shape == (3, 13)
+    assert out[1, -1].item() == 1.0
+    assert out[2, -1].item() == 0.0

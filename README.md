@@ -19,6 +19,7 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 ## 文件结构
 
 - `augment.py`：结构增强，包括随机旋转、平移、坐标噪声和 atom dropout。
+- `physics.py`：从 xyz 坐标计算 Li 壳层、配位和距离相关物理先验。
 - `dataloader.py`：读取 `.xyz` 文件，支持 `pair` 和 `simclr` 数据模式。
 - `model.py`：定义 encoder、投影头和多种 contrastive loss。
 - `utils.py`：seed、配置、checkpoint、环境信息工具。
@@ -28,6 +29,10 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 - `eval.py`：固定 pair list 的 checkpoint 评估入口。
 - `configs/default.yaml`：默认训练配置。
 - `scripts/export_embeddings.py`：导出 embedding 和 metadata。
+- `scripts/compute_physical_descriptors.py`：从 xyz 导出配位数和 Li 距离统计。
+- `scripts/run_evaluation_suite.py`：运行 pair ROC、signature probe、coordination probe 和 baseline 对比。
+- `scripts/run_experiment.py`：统一训练、评估、描述符导出和命令记录。
+- `scripts/make_tiny_xyz.py`：生成 CPU smoke test 用的小样本 xyz 数据。
 - `tests/test_smoke.py`：最小 smoke tests。
 - `ratio_embedding/ratio_data_generation.ipynb`：ratio embedding 数据生成实验 notebook。
 
@@ -85,7 +90,9 @@ python train.py \
   --data_dir /path/to/xyz_data \
   --log_dir ./runs/ssr_exp1 \
   --mode simclr \
-  --loss simclr
+  --loss simclr \
+  --feature_mode element_shell \
+  --center_on_li
 ```
 
 兼容旧的 signature pair 训练：
@@ -143,19 +150,102 @@ python eval.py \
 
 评估使用固定 pair list，由 `--seed` 和 `--max_pairs_per_anchor` 控制，便于复现实验。
 
+## 评估套件
+
+阶段 4 的评估套件会输出：
+
+- pair ROC-AUC 和正负 pair 平均 cosine similarity
+- SSR embedding 的 signature linear probe
+- composition-only signature baseline
+- SSR embedding 的 coordination number regression probe
+- composition-only coordination baseline
+- dummy baseline
+
+```bash
+python scripts/run_evaluation_suite.py \
+  --data_dir /path/to/xyz_data \
+  --ckpt ./runs/ssr_exp1/best.pt \
+  --out_dir ./runs/ssr_exp1/evaluation \
+  --device cpu \
+  --feature_mode element_shell \
+  --center_on_li
+```
+
+输出：
+
+- `metrics.json`
+- `metrics.csv`
+- `embeddings.npy`
+- `metadata.csv`
+
+## 端到端实验
+
+阶段 5 的实验入口会记录命令、训练 checkpoint、评估结果和物理描述符：
+
+```bash
+python scripts/run_experiment.py \
+  --data_dir /path/to/xyz_data \
+  --log_dir ./runs/ssr_exp1 \
+  --config configs/default.yaml \
+  --device cpu
+```
+
+生成 CPU 小样本数据并快速测试：
+
+```bash
+python scripts/make_tiny_xyz.py --out_dir ./tmp/tiny_xyz
+python scripts/run_experiment.py \
+  --data_dir ./tmp/tiny_xyz \
+  --log_dir ./runs/tiny_cpu \
+  --epochs 1 \
+  --batch_size 2 \
+  --device cpu
+```
+
 ## 导出 Embedding
 
 ```bash
 python scripts/export_embeddings.py \
   --data_dir /path/to/xyz_data \
   --ckpt ./runs/ssr_exp1/best.pt \
-  --out_dir ./embeddings/ssr_exp1
+  --out_dir ./embeddings/ssr_exp1 \
+  --feature_mode element_shell \
+  --center_on_li
 ```
 
 输出：
 
 - `embeddings.npy`
 - `metadata.csv`
+
+## 物理描述符
+
+普通 xyz 文件已经足够计算一部分重要物理量：
+
+- Li 配位数，基于 `--li_cutoff`。
+- 每个原子到最近 Li 的距离。
+- 是否位于 Li 第一溶剂化壳层。
+- 以 Li 为中心的平移归一化。
+- 给定半径内的 Li-centered crop。
+
+导出描述符：
+
+```bash
+python scripts/compute_physical_descriptors.py \
+  --data_dir /path/to/xyz_data \
+  --out_csv ./descriptors.csv \
+  --li_cutoff 2.5
+```
+
+仅靠普通 xyz 通常不能可靠获得：
+
+- force-field atom type
+- partial charge
+- molecule id / residue id
+- 分子内键拓扑
+- 周期性 box 和 PBC minimum image 距离
+
+这些需要额外的拓扑文件、力场参数、轨迹元数据或带 lattice/box 信息的扩展 xyz。
 
 ## 测试
 
@@ -167,7 +257,7 @@ python -m pytest tests/test_smoke.py -q
 
 - 默认 SimCLR positive 已升级为同结构增强视图；但时间邻近和物理相似性 positive 仍未实现。
 - `pair` mode 中正负样本仍由 signature 定义，可能更偏向组成分类。
-- 尚未加入周期性边界条件、分子身份、部分电荷、显式配位边等物理先验。
+- 已加入 xyz 可计算的 Li 壳层特征；周期性边界条件、分子身份、部分电荷、显式拓扑边仍需要额外数据。
 - 已有最小 smoke tests，但仍缺少完整单元测试和真实数据回归测试。
 - 需要与 RDF、coordination number、SOAP、SchNet/DimeNet/PaiNN 等 baseline 做系统比较。
 

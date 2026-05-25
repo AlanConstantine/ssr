@@ -8,6 +8,10 @@ patience: 10
 temperature: 0.1
 seed: 42
 feat_dim: 10
+feature_mode: element_shell
+li_cutoff: 2.5
+center_on_li: true
+shell_radius:
 dim: 128
 depth: 4
 num_nearest_neighbors: 12

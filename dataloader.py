@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Callable, Dict, Sequence
 import torch
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
-from rdkit import Chem
-from rdkit.Chem.rdchem import Atom
 from augment import AugmentConfig, augment_structure
+from physics import PhysicalFeatureConfig, append_shell_features, center_and_crop_on_li
 from utils import seed_worker
 
 # ------------------------------------------------------------------ #
@@ -47,8 +46,10 @@ class SolvationStructure:
     """
     def __init__(self,
                  xyz_path: Path,
-                 feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None):
+                 feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
+                 physical_config: Optional[PhysicalFeatureConfig] = None):
         self.path = xyz_path
+        self.physical_config = physical_config or PhysicalFeatureConfig()
         self.coords: torch.Tensor
         self.symbols: List[str]
         self.signature: str
@@ -56,7 +57,7 @@ class SolvationStructure:
         self._load(feat_fn or element_one_hot)
 
     # -------------------------------------------------------------- #
-    def _load(self, feat_fn: Callable[[Atom], torch.Tensor]) -> None:
+    def _load(self, feat_fn: Callable[[str], torch.Tensor]) -> None:
         with open(self.path, 'r') as f:
             lines = [ln.strip() for ln in f.readlines()]
 
@@ -77,7 +78,7 @@ class SolvationStructure:
             sym, x, y, z = parts[0], float(parts[1]), float(parts[2]), float(parts[3])
             symbols.append(sym)
             coords.append([x, y, z])
-            feats.append(feat_fn(Chem.Atom(sym)))
+            feats.append(feat_fn(sym))
 
         if not coords:
             raise ValueError(f'{self.path} contains no atoms')
@@ -85,6 +86,24 @@ class SolvationStructure:
         self.coords = torch.tensor(coords, dtype=torch.float32)
         self.symbols = symbols
         self.features = torch.stack(feats)
+
+        if self.physical_config.center_on_li or self.physical_config.shell_radius is not None:
+            self.coords, self.features, self.symbols = center_and_crop_on_li(
+                self.coords,
+                self.features,
+                self.symbols,
+                shell_radius=self.physical_config.shell_radius,
+            )
+
+        if self.physical_config.mode == 'element_shell':
+            self.features = append_shell_features(
+                self.features,
+                self.coords,
+                self.symbols,
+                li_cutoff=self.physical_config.li_cutoff,
+            )
+        elif self.physical_config.mode != 'element':
+            raise ValueError(f'unsupported feature mode: {self.physical_config.mode}')
 
 
 # ------------------------------------------------------------------ #
@@ -96,11 +115,13 @@ class ContrastiveDataset(Dataset):
     def __init__(self,
                  data_dir: Path,
                  max_neg: Optional[int] = None,
-                 feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                 feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
+                 physical_config: Optional[PhysicalFeatureConfig] = None,
                  pair_list: Optional[Sequence[Tuple[int, int, float]]] = None):
         self.data_dir, self.paths = _discover_xyz_paths(data_dir)
         self.max_neg = max_neg
         self.feat_fn = feat_fn
+        self.physical_config = physical_config or PhysicalFeatureConfig()
         self.pair_list = list(pair_list) if pair_list is not None else None
 
         # bucket by signature
@@ -136,8 +157,8 @@ class ContrastiveDataset(Dataset):
         """
         if self.pair_list is not None:
             anchor_idx, other_idx, label_value = self.pair_list[idx]
-            anchor = SolvationStructure(self.paths[anchor_idx], self.feat_fn)
-            other = SolvationStructure(self.paths[other_idx], self.feat_fn)
+            anchor = SolvationStructure(self.paths[anchor_idx], self.feat_fn, self.physical_config)
+            other = SolvationStructure(self.paths[other_idx], self.feat_fn, self.physical_config)
             return anchor, other, torch.tensor(float(label_value))
 
         anchor_path = self.paths[idx]
@@ -162,8 +183,8 @@ class ContrastiveDataset(Dataset):
             other_idx = random.choice(candidates)
             label = torch.tensor(0.0)
 
-        anchor = SolvationStructure(anchor_path, self.feat_fn)
-        other = SolvationStructure(self.paths[other_idx], self.feat_fn)
+        anchor = SolvationStructure(anchor_path, self.feat_fn, self.physical_config)
+        other = SolvationStructure(self.paths[other_idx], self.feat_fn, self.physical_config)
 
         return anchor, other, label
 
@@ -177,18 +198,20 @@ class SimCLRDataset(Dataset):
     def __init__(
         self,
         data_dir: Path,
-        feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+        feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
         augment_config: Optional[AugmentConfig] = None,
+        physical_config: Optional[PhysicalFeatureConfig] = None,
     ):
         self.data_dir, self.paths = _discover_xyz_paths(data_dir)
         self.feat_fn = feat_fn
         self.augment_config = augment_config or AugmentConfig()
+        self.physical_config = physical_config or PhysicalFeatureConfig()
 
     def __len__(self) -> int:
         return len(self.paths)
 
     def __getitem__(self, idx: int) -> Tuple[SolvationStructure, SolvationStructure]:
-        struct = SolvationStructure(self.paths[idx], self.feat_fn)
+        struct = SolvationStructure(self.paths[idx], self.feat_fn, self.physical_config)
         coords_a, feats_a = augment_structure(struct.coords, struct.features, self.augment_config)
         coords_b, feats_b = augment_structure(struct.coords, struct.features, self.augment_config)
         view_a = _view_from_structure(struct, coords_a, feats_a)
@@ -246,9 +269,10 @@ def get_dataloader(data_dir: str,
                    batch_size: int = 32,
                    num_workers: int = 4,
                    max_neg: Optional[int] = None,
-                   feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                   feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
                    mode: str = 'pair',
                    augment_config: Optional[AugmentConfig] = None,
+                   physical_config: Optional[PhysicalFeatureConfig] = None,
                    pair_list: Optional[Sequence[Tuple[int, int, float]]] = None,
                    sampler: Optional[str] = None,
                    rank: Optional[int] = None,
@@ -257,10 +281,14 @@ def get_dataloader(data_dir: str,
                    seed: int = 42,
                    ) -> DataLoader:
     if mode == 'pair':
-        ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn, pair_list=pair_list)
+        ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn,
+                                physical_config=physical_config,
+                                pair_list=pair_list)
         collate_fn = _collate_fn
     elif mode == 'simclr':
-        ds = SimCLRDataset(Path(data_dir), feat_fn=feat_fn, augment_config=augment_config)
+        ds = SimCLRDataset(Path(data_dir), feat_fn=feat_fn,
+                           augment_config=augment_config,
+                           physical_config=physical_config)
         collate_fn = _simclr_collate_fn
     else:
         raise ValueError(f'unsupported dataloader mode: {mode}')
@@ -294,11 +322,12 @@ def get_dataloader_ddp(data_dir: str,
                    batch_size: int = 32,
                    num_workers: int = 4,
                    max_neg: Optional[int] = None,
-                   feat_fn: Optional[Callable[[Atom], torch.Tensor]] = None,
+                   feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
                    rank: Optional[int] = None,            # DDP
                    world_size: Optional[int] = None,     # DDP
                    sampler = None,
-                   mode: str = 'pair'
+                   mode: str = 'pair',
+                   physical_config: Optional[PhysicalFeatureConfig] = None,
                    ) -> DataLoader:
     return get_dataloader(data_dir,
                           batch_size=batch_size,
@@ -309,7 +338,8 @@ def get_dataloader_ddp(data_dir: str,
                           rank=rank,
                           world_size=world_size,
                           drop_last=sampler == 'distributed',
-                          mode=mode)
+                          mode=mode,
+                          physical_config=physical_config)
 
 # ------------------------------------------------------------------ #
 def _collate_fn(batch):

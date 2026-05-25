@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from dataloader import ContrastiveDataset, _collate_fn
 from model import SolvContrastive, SolvEncoder
+from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import load_model_state, set_seed
 
 
@@ -24,6 +25,12 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', default='auto')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--feat_dim', type=int, default=10)
+    parser.add_argument('--feature_mode', default='element',
+                        choices=['element', 'element_shell'])
+    parser.add_argument('--li_cutoff', type=float, default=2.5)
+    parser.add_argument('--center_on_li', action='store_true')
+    parser.add_argument('--shell_radius', type=float, default=None)
     return parser.parse_args()
 
 
@@ -35,7 +42,13 @@ def main():
 
     device = torch.device(args.device if args.device != 'auto'
                           else ('cuda' if torch.cuda.is_available() else 'cpu'))
-    dataset = ContrastiveDataset(Path(args.data_dir), pair_list=[])
+    physical_config = PhysicalFeatureConfig(
+        mode=args.feature_mode,
+        li_cutoff=args.li_cutoff,
+        center_on_li=args.center_on_li,
+        shell_radius=args.shell_radius,
+    )
+    dataset = ContrastiveDataset(Path(args.data_dir), physical_config=physical_config, pair_list=[])
     loader = torch.utils.data.DataLoader(
         [(dataset.paths[i], dataset.signatures[i]) for i in range(len(dataset.paths))],
         batch_size=args.batch_size,
@@ -43,7 +56,8 @@ def main():
         num_workers=0,
     )
 
-    encoder = SolvEncoder(feat_dim=10, dim=128, depth=4, num_nearest_neighbors=12)
+    encoder = SolvEncoder(feat_dim=feature_dim_for_mode(args.feat_dim, args.feature_mode),
+                          dim=128, depth=4, num_nearest_neighbors=12)
     model = SolvContrastive(encoder, dim=128, proj_dim=128)
     model.load_state_dict(load_model_state(args.ckpt, map_location='cpu'))
     model.to(device)
@@ -56,7 +70,7 @@ def main():
             batch_structs = []
             for path in paths:
                 from dataloader import SolvationStructure
-                batch_structs.append(SolvationStructure(Path(path)))
+                batch_structs.append(SolvationStructure(Path(path), physical_config=physical_config))
             batch = _collate_fn([(s, s, torch.tensor(1.0)) for s in batch_structs])
             feats = batch['a_feats'].to(device).float()
             coords = batch['a_coords'].to(device).float()

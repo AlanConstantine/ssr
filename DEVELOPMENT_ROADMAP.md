@@ -8,7 +8,25 @@
 - 阶段 1A：已新增同结构增强视图、`SimCLRDataset` 和标准 SimCLR loss。
 - 阶段 2：已接入 `pair` / `simclr` dataset mode，以及 `nt_xent`、`simclr`、`bce_similarity`、`triplet_margin` loss 选择。
 
-尚未完成的是阶段 1B 的 temporal positive、阶段 1C 的 physical positive、hard negative mining 的高级策略，以及阶段 3 之后的物理先验和系统评估。
+尚未完成的是阶段 1B 的 temporal positive、阶段 1C 的 physical positive、hard negative mining 的高级策略，以及阶段 4 之后的系统评估。
+
+阶段 3 的 xyz 可计算部分也已经落地：
+
+- `element_shell` 特征模式：元素 one-hot + Li 标记 + 最近 Li 距离 + 第一壳层标记。
+- `center_on_li`：以 Li 质心为中心平移坐标。
+- `shell_radius`：可选 Li-centered crop。
+- `compute_physical_descriptors.py`：导出配位数和 Li 距离统计。
+
+阶段 3 中仍需要额外数据的部分包括 partial charge、force-field atom type、molecule id、真实拓扑边、周期性 box/PBC。
+
+阶段 4 和阶段 5 的基础版本已经落地：
+
+- `evaluation.py`：统一评估函数，支持 pair ROC-AUC、signature probe、coordination probe 和 composition/dummy baseline。
+- `scripts/run_evaluation_suite.py`：输出 `metrics.json`、`metrics.csv`、`embeddings.npy`、`metadata.csv`。
+- `scripts/run_experiment.py`：统一训练、评估、描述符导出，并保存 `commands.json`。
+- `scripts/make_tiny_xyz.py`：生成 CPU smoke test 用的小样本 xyz 数据。
+
+后续仍建议补充 RDF/SOAP baseline、真实物性下游任务、UMAP/t-SNE 可视化和 CI。
 
 ## 目标
 

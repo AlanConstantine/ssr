@@ -14,6 +14,7 @@ import torch
 from sklearn.metrics import roc_auc_score
 from dataloader import build_fixed_pair_list, get_dataloader
 from model import SolvEncoder, SolvContrastive
+from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import load_model_state
 
 # ------------------------------------------------------------------ #
@@ -26,6 +27,12 @@ def parse_args():
     parser.add_argument('--device', default='auto')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--max_pairs_per_anchor', type=int, default=2)
+    parser.add_argument('--feat_dim', type=int, default=10)
+    parser.add_argument('--feature_mode', default='element',
+                        choices=['element', 'element_shell'])
+    parser.add_argument('--li_cutoff', type=float, default=2.5)
+    parser.add_argument('--center_on_li', action='store_true')
+    parser.add_argument('--shell_radius', type=float, default=None)
     return parser.parse_args()
 
 
@@ -42,14 +49,22 @@ def main():
     pair_list = build_fixed_pair_list(args.data_dir,
                                       max_pairs_per_anchor=args.max_pairs_per_anchor,
                                       seed=args.seed)
+    physical_config = PhysicalFeatureConfig(
+        mode=args.feature_mode,
+        li_cutoff=args.li_cutoff,
+        center_on_li=args.center_on_li,
+        shell_radius=args.shell_radius,
+    )
     dl = get_dataloader(args.data_dir,
                         batch_size=args.batch_size,
                         num_workers=args.num_workers,
                         pair_list=pair_list,
                         mode='pair',
+                        physical_config=physical_config,
                         seed=args.seed)
 
-    encoder = SolvEncoder(feat_dim=10, dim=128, depth=4, num_nearest_neighbors=12)
+    encoder = SolvEncoder(feat_dim=feature_dim_for_mode(args.feat_dim, args.feature_mode),
+                          dim=128, depth=4, num_nearest_neighbors=12)
     model = SolvContrastive(encoder, dim=128, proj_dim=128)
     model.load_state_dict(load_model_state(args.ckpt, map_location='cpu'))
     model.to(device)
