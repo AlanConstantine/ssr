@@ -7,7 +7,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from augment import AugmentConfig, augment_structure
-from dataloader import build_fixed_pair_list, get_dataloader, parse_temporal_metadata
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, atom_identity_and_property_features, build_fixed_pair_list, get_dataloader, parse_temporal_metadata
 from evaluation import acsf_like_descriptor, rdf_descriptor, shell_composition
 from model import SolvContrastive, SolvEncoder, simclr_nt_xent
 from physics import PhysicalFeatureConfig, append_shell_features, feature_dim_for_mode
@@ -45,12 +45,12 @@ def test_pair_and_simclr_dataloaders(tmp_path):
     pair_list = build_fixed_pair_list(str(tmp_path), max_pairs_per_anchor=1, seed=7)
     pair_dl = get_dataloader(str(tmp_path), batch_size=2, mode="pair", pair_list=pair_list, num_workers=0)
     pair_batch = next(iter(pair_dl))
-    assert pair_batch["a_feats"].shape[-1] == 10
+    assert pair_batch["a_feats"].shape[-1] == len(ELEMENTS)
     assert "labels" in pair_batch
 
     simclr_dl = get_dataloader(str(tmp_path), batch_size=2, mode="simclr", num_workers=0)
     simclr_batch = next(iter(simclr_dl))
-    assert simclr_batch["view1_feats"].shape[-1] == 10
+    assert simclr_batch["view1_feats"].shape[-1] == len(ELEMENTS)
     assert simclr_batch["view2_coords"].shape[-1] == 3
 
     shell_dl = get_dataloader(
@@ -61,19 +61,32 @@ def test_pair_and_simclr_dataloaders(tmp_path):
         physical_config=PhysicalFeatureConfig(mode="element_shell", center_on_li=True),
     )
     shell_batch = next(iter(shell_dl))
-    assert shell_batch["view1_feats"].shape[-1] == feature_dim_for_mode(10, "element_shell")
+    assert shell_batch["view1_feats"].shape[-1] == feature_dim_for_mode(len(ELEMENTS), "element_shell")
+
+    atom_phys_dl = get_dataloader(
+        str(tmp_path),
+        batch_size=2,
+        mode="simclr",
+        num_workers=0,
+        physical_config=PhysicalFeatureConfig(mode="atom_phys_shell", center_on_li=True),
+    )
+    atom_phys_batch = next(iter(atom_phys_dl))
+    base_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
+    assert atom_phys_batch["view1_feats"].shape[-1] == feature_dim_for_mode(base_dim, "atom_phys_shell")
 
 
 def test_temporal_metadata_and_dataloader(tmp_path):
-    write_temporal_xyz(tmp_path / "TrajA_Frame0_Li_1DMC_id0.xyz", "Li_1DMC", "A", 0)
-    write_temporal_xyz(tmp_path / "TrajA_Frame2_Li_1DMC_id1.xyz", "Li_1DMC", "A", 2)
-    write_temporal_xyz(tmp_path / "TrajA_Frame18_Li_1DMC_id2.xyz", "Li_1DMC", "A", 18)
-    write_temporal_xyz(tmp_path / "TrajA_Frame20_Li_1DMC_id3.xyz", "Li_1DMC", "A", 20)
-    write_temporal_xyz(tmp_path / "TrajB_Frame0_Li_1DMC_id4.xyz", "Li_1DMC", "B", 0)
-    write_temporal_xyz(tmp_path / "TrajB_Frame2_Li_1DMC_id5.xyz", "Li_1DMC", "B", 2)
+    write_temporal_xyz(tmp_path / "TrajA_Frame0_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 0)
+    write_temporal_xyz(tmp_path / "TrajA_Frame2_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 2)
+    write_temporal_xyz(tmp_path / "TrajA_Frame18_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 18)
+    write_temporal_xyz(tmp_path / "TrajA_Frame20_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 20)
+    write_temporal_xyz(tmp_path / "TrajA_Frame0_Li_1DMC_id2040.xyz", "Li_1DMC", "A", 0)
+    write_temporal_xyz(tmp_path / "TrajA_Frame2_Li_1DMC_id2040.xyz", "Li_1DMC", "A", 2)
 
-    meta = parse_temporal_metadata(tmp_path / "TrajA_Frame20_Li_1DMC_id3.xyz")
+    meta = parse_temporal_metadata(tmp_path / "TrajA_Frame20_Li_1DMC_id1030.xyz")
     assert meta.trajectory_id == "A"
+    assert meta.center_id == "1030"
+    assert meta.temporal_id == "A:1030"
     assert meta.frame_index == 20
     assert meta.signature == "Li_1DMC"
 
@@ -86,7 +99,7 @@ def test_temporal_metadata_and_dataloader(tmp_path):
         temporal_negative_min_gap=10,
     )
     batch = next(iter(temporal_dl))
-    assert batch["a_feats"].shape[-1] == 10
+    assert batch["a_feats"].shape[-1] == len(ELEMENTS)
     assert "labels" in batch
     assert set(batch["labels"].tolist()).issubset({0.0, 1.0})
 
@@ -118,9 +131,9 @@ def test_augment_keeps_feature_alignment():
 
 def test_shell_feature_builder():
     coords = torch.tensor([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
-    feats = torch.eye(10)[:3]
+    feats = torch.eye(len(ELEMENTS))[:3]
     out = append_shell_features(feats, coords, ["Li", "O", "C"], li_cutoff=2.5)
-    assert out.shape == (3, 13)
+    assert out.shape == (3, len(ELEMENTS) + 3)
     assert out[1, -1].item() == 1.0
     assert out[2, -1].item() == 0.0
 
@@ -134,3 +147,14 @@ def test_stage4_descriptors(tmp_path):
     assert shell_composition(struct, li_cutoff=2.5)["O"] == 1.0
     assert rdf_descriptor(struct, bins=4, max_distance=4.0).shape == (4,)
     assert acsf_like_descriptor(struct, bins=4, max_distance=4.0).shape[0] == 36
+
+
+def test_electrolyte_atom_features_include_boron_and_silicon():
+    b = atom_identity_and_property_features("B")
+    si = atom_identity_and_property_features("Si")
+    unknown = atom_identity_and_property_features("Xe")
+    assert b.shape[0] == len(ELEMENTS) + ATOM_PROPERTY_DIM
+    assert si.shape[0] == len(ELEMENTS) + ATOM_PROPERTY_DIM
+    assert b.sum().item() > 0
+    assert si.sum().item() > 0
+    assert unknown.sum().item() == 0

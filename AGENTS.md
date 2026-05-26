@@ -11,7 +11,7 @@ The preferred default path is SimCLR-style self-supervision: two augmented views
 - Stage 0 basics are in place: config loading, seed handling, richer checkpoints, fixed eval pair lists, environment metadata, and smoke tests.
 - Stage 1A is implemented: same-structure augmented views, `SimCLRDataset`, and standard SimCLR / NT-Xent loss.
 - Stage 2 basics are implemented: `pair` and `simclr` modes plus `nt_xent`, `simclr`, `bce_similarity`, and `triplet_margin` losses.
-- Stage 3 xyz-derived physical features are partially implemented: `element_shell`, Li-centering, optional Li shell cropping, and physical descriptor export.
+- Stage 3 xyz-derived physical features are partially implemented: `element_shell`, `atom_phys_shell`, Li-centering, optional Li shell cropping, and physical descriptor export.
 - Stage 4/5 has a minimal runnable loop: evaluation suite, RDF/ACSF-like baselines, random/untrained EGNN baselines, shell-state probes, optional few-shot downstream probes, embedding export, physical descriptor export, SVG visualizations, tiny xyz generation, and an end-to-end experiment runner.
 
 Planned but not complete: temporal positives, physical descriptor based positives, hard negative mining, real SOAP/ACSF library baselines, non-equivariant GNN baselines, EGNN no-pretraining/random baselines, real downstream property tasks, and service-side CI.
@@ -96,7 +96,8 @@ scripts/run_local_checks.sh
 - Training data directories contain `.xyz` files.
 - Each xyz file has at least a first atom-count line, a second metadata/signature line, and atom rows with `element x y z`.
 - Filename signatures are expected to look like `Frame100_Li_2DMC_2EC_2EMC_id1030.xyz`; the parsed signature is `Li_2DMC_2EC_2EMC`.
-- Default element one-hot order is `H C N O F Li P S Cl Br`.
+- Default element one-hot order is `H Li B C N O F Na Mg Al Si P S Cl K Ca Br I`.
+- `atom_phys` and `atom_phys_shell` append normalized atomic number, mass, Pauling electronegativity, covalent radius, vdW radius, group, period, and valence-electron count to the one-hot identity.
 - Pair mode needs at least two different signatures unless a fixed `pair_list` is provided.
 
 ## Evaluation Notes

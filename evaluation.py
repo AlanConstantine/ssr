@@ -22,7 +22,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import make_pipeline
 
-from dataloader import ContrastiveDataset, SolvationStructure, _collate_fn, build_fixed_pair_list, get_dataloader
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, SolvationStructure, _collate_fn, build_fixed_pair_list, get_dataloader
 from model import SolvContrastive, SolvEncoder
 from physics import PhysicalFeatureConfig, feature_dim_for_mode, nearest_li_distance
 from utils import load_model_state, set_seed
@@ -35,8 +35,8 @@ class EvalConfig:
     batch_size: int = 64
     seed: int = 42
     max_pairs_per_anchor: int = 2
-    feat_dim: int = 10
-    feature_mode: str = 'element_shell'
+    feat_dim: int = len(ELEMENTS)
+    feature_mode: str = 'atom_phys_shell'
     li_cutoff: float = 2.5
     center_on_li: bool = True
     shell_radius: float | None = None
@@ -161,6 +161,9 @@ def load_metadata_and_descriptors(
 
 
 def export_embeddings(cfg: EvalConfig, device: torch.device, load_checkpoint: bool = True) -> np.ndarray:
+    feat_dim = cfg.feat_dim
+    if cfg.feature_mode.startswith('atom_phys') and feat_dim == len(ELEMENTS):
+        feat_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
     physical_config = PhysicalFeatureConfig(
         mode=cfg.feature_mode,
         li_cutoff=cfg.li_cutoff,
@@ -175,7 +178,7 @@ def export_embeddings(cfg: EvalConfig, device: torch.device, load_checkpoint: bo
         num_workers=0,
     )
     encoder = SolvEncoder(
-        feat_dim=feature_dim_for_mode(cfg.feat_dim, cfg.feature_mode),
+        feat_dim=feature_dim_for_mode(feat_dim, cfg.feature_mode),
         dim=cfg.dim,
         depth=cfg.depth,
         num_nearest_neighbors=cfg.num_nearest_neighbors,
@@ -199,6 +202,9 @@ def export_embeddings(cfg: EvalConfig, device: torch.device, load_checkpoint: bo
 
 
 def pair_auc(cfg: EvalConfig, device: torch.device) -> dict[str, float]:
+    feat_dim = cfg.feat_dim
+    if cfg.feature_mode.startswith('atom_phys') and feat_dim == len(ELEMENTS):
+        feat_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
     pair_list = build_fixed_pair_list(cfg.data_dir, cfg.max_pairs_per_anchor, cfg.seed)
     physical_config = PhysicalFeatureConfig(
         mode=cfg.feature_mode,
@@ -215,7 +221,7 @@ def pair_auc(cfg: EvalConfig, device: torch.device) -> dict[str, float]:
         seed=cfg.seed,
         num_workers=0,
     )
-    encoder = SolvEncoder(feature_dim_for_mode(cfg.feat_dim, cfg.feature_mode), cfg.dim, cfg.depth, cfg.num_nearest_neighbors)
+    encoder = SolvEncoder(feature_dim_for_mode(feat_dim, cfg.feature_mode), cfg.dim, cfg.depth, cfg.num_nearest_neighbors)
     model = SolvContrastive(encoder, dim=cfg.dim, proj_dim=cfg.dim)
     model.load_state_dict(load_model_state(cfg.ckpt, map_location='cpu'))
     model.to(device)

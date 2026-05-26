@@ -10,7 +10,7 @@ However, adjacent MD frames are also strongly autocorrelated. Treating every adj
 
 Therefore SSR uses a conservative temporal definition:
 
-- require explicit trajectory id and frame index;
+- require explicit trajectory id, center Li id, and frame index;
 - use same-trajectory bounded time windows for positives;
 - use far same-signature frames as preferred negatives;
 - use different-trajectory negatives only as fallback;
@@ -22,6 +22,7 @@ For an anchor frame `i`, frame `j` is a positive if:
 
 ```text
 trajectory_i == trajectory_j
+center_li_id_i == center_li_id_j
 temporal_min_lag <= abs(frame_i - frame_j) <= temporal_positive_window
 ```
 
@@ -39,7 +40,7 @@ or if it comes from another trajectory. Same-signature negatives are preferred w
 Recommended `.xyz` comment line:
 
 ```text
-signature: Li_2DMC_2EC_2EMC trajectory: TrajA frame: 100
+signature: Li_2DMC_2EC_2EMC trajectory: TrajA center_id: 1030 frame: 100
 ```
 
 Supported filename style:
@@ -48,7 +49,9 @@ Supported filename style:
 TrajA_Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
 ```
 
-Temporal mode intentionally fails if trajectory id or frame index cannot be parsed. This avoids silently treating unordered `.xyz` collections as trajectories.
+In this project naming convention, `id1030` is the center Li ion id. Temporal mode groups frames by `trajectory_id + center_id`, not by trajectory alone. This matters because different Li ions in the same trajectory can have different solvation environments and should not be treated as the same temporal object.
+
+Temporal mode intentionally fails if trajectory id, center Li id, or frame index cannot be parsed. This avoids silently treating unordered `.xyz` collections as trajectories.
 
 ## Choosing Windows
 

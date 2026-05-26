@@ -23,13 +23,42 @@ from physics import PhysicalFeatureConfig, append_shell_features, center_and_cro
 from utils import seed_worker
 
 # ------------------------------------------------------------------ #
-# Helper: periodic table → one-hot index
-ELEMENTS = ['H', 'C', 'N', 'O', 'F', 'Li', 'P', 'S', 'Cl', 'Br']
+# Common electrolyte / battery-interface elements used for one-hot identity.
+ELEMENTS = [
+    'H', 'Li', 'B', 'C', 'N', 'O', 'F', 'Na', 'Mg', 'Al',
+    'Si', 'P', 'S', 'Cl', 'K', 'Ca', 'Br', 'I',
+]
+
+# Raw values: atomic number, atomic mass, Pauling electronegativity,
+# covalent radius, vdW radius, group, period, valence electrons.
+ATOM_PROPERTIES = {
+    'H': (1, 1.008, 2.20, 0.31, 1.20, 1, 1, 1),
+    'Li': (3, 6.94, 0.98, 1.28, 1.82, 1, 2, 1),
+    'B': (5, 10.81, 2.04, 0.84, 1.92, 13, 2, 3),
+    'C': (6, 12.011, 2.55, 0.76, 1.70, 14, 2, 4),
+    'N': (7, 14.007, 3.04, 0.71, 1.55, 15, 2, 5),
+    'O': (8, 15.999, 3.44, 0.66, 1.52, 16, 2, 6),
+    'F': (9, 18.998, 3.98, 0.57, 1.47, 17, 2, 7),
+    'Na': (11, 22.990, 0.93, 1.66, 2.27, 1, 3, 1),
+    'Mg': (12, 24.305, 1.31, 1.41, 1.73, 2, 3, 2),
+    'Al': (13, 26.982, 1.61, 1.21, 1.84, 13, 3, 3),
+    'Si': (14, 28.085, 1.90, 1.11, 2.10, 14, 3, 4),
+    'P': (15, 30.974, 2.19, 1.07, 1.80, 15, 3, 5),
+    'S': (16, 32.06, 2.58, 1.05, 1.80, 16, 3, 6),
+    'Cl': (17, 35.45, 3.16, 1.02, 1.75, 17, 3, 7),
+    'K': (19, 39.098, 0.82, 2.03, 2.75, 1, 4, 1),
+    'Ca': (20, 40.078, 1.00, 1.76, 2.31, 2, 4, 2),
+    'Br': (35, 79.904, 2.96, 1.20, 1.85, 17, 4, 7),
+    'I': (53, 126.904, 2.66, 1.39, 1.98, 17, 5, 7),
+}
+ATOM_PROPERTY_DIM = 8
 
 
 @dataclass(frozen=True)
 class TemporalMetadata:
     trajectory_id: str
+    center_id: str
+    temporal_id: str
     frame_index: int
     signature: str
 
@@ -41,6 +70,27 @@ def element_one_hot(symbol: str) -> torch.Tensor:
     except ValueError:              # unknown element → all zeros
         pass
     return vec
+
+
+def atom_property_features(symbol: str) -> torch.Tensor:
+    raw = ATOM_PROPERTIES.get(symbol)
+    if raw is None:
+        return torch.zeros(ATOM_PROPERTY_DIM)
+    atomic_number, mass, electronegativity, covalent_radius, vdw_radius, group, period, valence = raw
+    return torch.tensor([
+        atomic_number / 60.0,
+        mass / 130.0,
+        electronegativity / 4.0,
+        covalent_radius / 2.5,
+        vdw_radius / 3.0,
+        group / 18.0,
+        period / 6.0,
+        valence / 8.0,
+    ], dtype=torch.float32)
+
+
+def atom_identity_and_property_features(symbol: str) -> torch.Tensor:
+    return torch.cat([element_one_hot(symbol), atom_property_features(symbol)])
 
 
 # ------------------------------------------------------------------ #
@@ -62,7 +112,8 @@ class SolvationStructure:
         self.symbols: List[str]
         self.signature: str
         self.features: torch.Tensor
-        self._load(feat_fn or element_one_hot)
+        default_feat_fn = atom_identity_and_property_features if self.physical_config.mode.startswith('atom_phys') else element_one_hot
+        self._load(feat_fn or default_feat_fn)
 
     # -------------------------------------------------------------- #
     def _load(self, feat_fn: Callable[[str], torch.Tensor]) -> None:
@@ -103,14 +154,14 @@ class SolvationStructure:
                 shell_radius=self.physical_config.shell_radius,
             )
 
-        if self.physical_config.mode == 'element_shell':
+        if self.physical_config.mode in {'element_shell', 'atom_phys_shell'}:
             self.features = append_shell_features(
                 self.features,
                 self.coords,
                 self.symbols,
                 li_cutoff=self.physical_config.li_cutoff,
             )
-        elif self.physical_config.mode != 'element':
+        elif self.physical_config.mode not in {'element', 'atom_phys'}:
             raise ValueError(f'unsupported feature mode: {self.physical_config.mode}')
 
 
@@ -266,7 +317,7 @@ class TemporalDataset(Dataset):
         self.metadata = [parse_temporal_metadata(path) for path in self.paths]
         self.traj2idx: Dict[str, List[int]] = {}
         for idx, meta in enumerate(self.metadata):
-            self.traj2idx.setdefault(meta.trajectory_id, []).append(idx)
+            self.traj2idx.setdefault(meta.temporal_id, []).append(idx)
         for indices in self.traj2idx.values():
             indices.sort(key=lambda i: self.metadata[i].frame_index)
 
@@ -278,7 +329,7 @@ class TemporalDataset(Dataset):
             for other_idx, other_meta in enumerate(self.metadata):
                 if other_idx == idx:
                     continue
-                same_traj = other_meta.trajectory_id == meta.trajectory_id
+                same_traj = other_meta.temporal_id == meta.temporal_id
                 frame_gap = abs(other_meta.frame_index - meta.frame_index)
                 if same_traj and self.min_lag <= frame_gap <= self.positive_window:
                     positives.append(other_idx)
@@ -359,7 +410,23 @@ def parse_temporal_metadata(path: Path) -> TemporalMetadata:
             f'could not parse frame index from {path.name}; use Frame100, step100, '
             f'or xyz comment fields like "frame: 100"'
         )
-    return TemporalMetadata(trajectory_id=str(trajectory_id), frame_index=int(frame_value), signature=signature)
+    center_id = _find_named_value(comment, ('center_id', 'center', 'li_id', 'id'))
+    if center_id is None:
+        center_id = _find_named_value(name, ('center_id', 'center', 'li_id', 'id'))
+    if center_id is None:
+        raise ValueError(
+            f'could not parse center Li id from {path.name}; use id1030, center1030, '
+            f'or xyz comment fields like "center_id: 1030"'
+        )
+    trajectory_id = str(trajectory_id)
+    center_id = str(center_id)
+    return TemporalMetadata(
+        trajectory_id=trajectory_id,
+        center_id=center_id,
+        temporal_id=f'{trajectory_id}:{center_id}',
+        frame_index=int(frame_value),
+        signature=signature,
+    )
 
 
 def _find_named_value(text: str, names: Sequence[str]) -> Optional[str]:
@@ -426,6 +493,9 @@ def get_dataloader(data_dir: str,
                    temporal_negative_min_gap: int = 50,
                    temporal_same_signature_negatives: bool = True,
                    ) -> DataLoader:
+    if physical_config is not None and physical_config.mode in {'atom_phys', 'atom_phys_shell'} and feat_fn is None:
+        feat_fn = atom_identity_and_property_features
+
     if mode == 'pair':
         ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn,
                                 physical_config=physical_config,

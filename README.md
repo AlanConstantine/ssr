@@ -80,7 +80,8 @@ C  2.615 0.812 0.004
 
 - 数据目录必须至少包含两个不同 signature，否则无法构造负样本。
 - 每个原子行至少需要 4 列：元素、x、y、z。
-- 当前默认元素 one-hot 支持：`H C N O F Li P S Cl Br`。
+- 当前默认元素 one-hot 支持常见电解液/电池界面元素：`H Li B C N O F Na Mg Al Si P S Cl K Ca Br I`。
+- 默认 `atom_phys_shell` 特征 = 元素 one-hot + 归一化原子物性 + Li shell 特征。原子物性包括 atomic number、atomic mass、Pauling electronegativity、covalent radius、vdW radius、group、period 和 valence electrons。
 
 ## 单卡训练
 
@@ -93,7 +94,7 @@ python train.py \
   --log_dir ./runs/ssr_exp1 \
   --mode simclr \
   --loss simclr \
-  --feature_mode element_shell \
+  --feature_mode atom_phys_shell \
   --center_on_li
 ```
 
@@ -117,14 +118,14 @@ python train.py \
   --loss bce_similarity \
   --temporal_positive_window 5 \
   --temporal_negative_min_gap 50 \
-  --feature_mode element_shell \
+  --feature_mode atom_phys_shell \
   --center_on_li
 ```
 
-`temporal` mode 要求每个 `.xyz` 能解析出 trajectory id 和 frame index。推荐在第二行 metadata 中显式写入：
+`temporal` mode 要求每个 `.xyz` 能解析出 trajectory id、中心 Li id 和 frame index。推荐在第二行 metadata 中显式写入：
 
 ```text
-signature: Li_2DMC_2EC_2EMC trajectory: TrajA frame: 100
+signature: Li_2DMC_2EC_2EMC trajectory: TrajA center_id: 1030 frame: 100
 ```
 
 或在文件名中使用：
@@ -133,7 +134,7 @@ signature: Li_2DMC_2EC_2EMC trajectory: TrajA frame: 100
 TrajA_Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
 ```
 
-temporal positive 定义为同一 trajectory 内满足：
+其中 `id1030` 表示中心 Li 离子的 id。temporal positive 定义为同一 trajectory、同一中心 Li id 内满足：
 
 ```text
 temporal_min_lag <= |frame_i - frame_j| <= temporal_positive_window
@@ -214,7 +215,7 @@ python scripts/run_evaluation_suite.py \
   --ckpt ./runs/ssr_exp1/best.pt \
   --out_dir ./runs/ssr_exp1/evaluation \
   --device cpu \
-  --feature_mode element_shell \
+  --feature_mode atom_phys_shell \
   --center_on_li
 ```
 
@@ -228,7 +229,7 @@ python scripts/run_evaluation_suite.py \
   --downstream_csv ./labels.csv \
   --downstream_target conductivity \
   --device cpu \
-  --feature_mode element_shell \
+  --feature_mode atom_phys_shell \
   --center_on_li
 ```
 
@@ -284,7 +285,7 @@ python scripts/export_embeddings.py \
   --data_dir /path/to/xyz_data \
   --ckpt ./runs/ssr_exp1/best.pt \
   --out_dir ./embeddings/ssr_exp1 \
-  --feature_mode element_shell \
+  --feature_mode atom_phys_shell \
   --center_on_li
 ```
 
@@ -341,7 +342,7 @@ scripts/run_local_checks.sh
 
 - 默认 SimCLR positive 已升级为同结构增强视图；时间邻近 positive 已实现为 `temporal` mode；物理相似性 positive 仍未实现。
 - `pair` mode 中正负样本仍由 signature 定义，可能更偏向组成分类。
-- 已加入 xyz 可计算的 Li 壳层特征；周期性边界条件、分子身份、部分电荷、显式拓扑边仍需要额外数据。
+- 已加入常见电解液元素 identity、原子物性编码和 xyz 可计算的 Li 壳层特征；周期性边界条件、分子身份、部分电荷、显式拓扑边仍需要额外数据。
 - 已有最小 smoke tests，但仍缺少完整单元测试和真实数据回归测试。
 - 已有 RDF、coordination number、ACSF-like radial descriptor、composition baseline；真实 SOAP、非等变 GNN、SchNet/DimeNet/PaiNN 等 baseline 仍待补充。
 

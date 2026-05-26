@@ -23,8 +23,8 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--max_pairs_per_anchor', type=int, default=2)
-    parser.add_argument('--feature_mode', default='element_shell',
-                        choices=['element', 'element_shell'])
+    parser.add_argument('--feature_mode', default='atom_phys_shell',
+                        choices=['element', 'element_shell', 'atom_phys', 'atom_phys_shell'])
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)

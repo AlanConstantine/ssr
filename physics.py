@@ -70,4 +70,8 @@ def feature_dim_for_mode(base_dim: int, mode: str) -> int:
         return base_dim
     if mode == 'element_shell':
         return base_dim + 3
+    if mode == 'atom_phys':
+        return base_dim
+    if mode == 'atom_phys_shell':
+        return base_dim + 3
     raise ValueError(f'unsupported feature mode: {mode}')

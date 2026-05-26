@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm.auto import tqdm
 from augment import AugmentConfig
-from dataloader import get_dataloader
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, get_dataloader
 from model import SolvEncoder, SolvContrastive, compute_contrastive_loss
 from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import attach_defaults, load_config, merge_config, save_checkpoint, save_config, save_env_info, set_seed
@@ -53,9 +53,9 @@ def parse_args():
                         help='early-stopping patience')
     parser.add_argument('--temperature', type=float, default=0.1)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--feat_dim', type=int, default=10)
-    parser.add_argument('--feature_mode', default='element',
-                        choices=['element', 'element_shell'])
+    parser.add_argument('--feat_dim', type=int, default=len(ELEMENTS))
+    parser.add_argument('--feature_mode', default='atom_phys_shell',
+                        choices=['element', 'element_shell', 'atom_phys', 'atom_phys_shell'])
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
@@ -119,6 +119,8 @@ def main():
         center_on_li=args.center_on_li,
         shell_radius=args.shell_radius,
     )
+    if args.feature_mode.startswith('atom_phys') and args.feat_dim == len(ELEMENTS):
+        args.feat_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
     dl = get_dataloader(args.data_dir,
                         batch_size=args.batch_size,
                         num_workers=args.num_workers,

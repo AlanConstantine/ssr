@@ -11,7 +11,7 @@ import torch
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from dataloader import ContrastiveDataset, _collate_fn
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, _collate_fn
 from model import SolvContrastive, SolvEncoder
 from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import config_hash, git_commit_hash, load_model_state, set_seed
@@ -26,9 +26,9 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', default='auto')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--feat_dim', type=int, default=10)
-    parser.add_argument('--feature_mode', default='element',
-                        choices=['element', 'element_shell'])
+    parser.add_argument('--feat_dim', type=int, default=len(ELEMENTS))
+    parser.add_argument('--feature_mode', default='atom_phys_shell',
+                        choices=['element', 'element_shell', 'atom_phys', 'atom_phys_shell'])
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
@@ -49,6 +49,8 @@ def main():
         center_on_li=args.center_on_li,
         shell_radius=args.shell_radius,
     )
+    if args.feature_mode.startswith('atom_phys') and args.feat_dim == len(ELEMENTS):
+        args.feat_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
     dataset = ContrastiveDataset(Path(args.data_dir), physical_config=physical_config, pair_list=[])
     loader = torch.utils.data.DataLoader(
         list(range(len(dataset.paths))),

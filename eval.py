@@ -12,7 +12,7 @@ import random
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
-from dataloader import build_fixed_pair_list, get_dataloader
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, build_fixed_pair_list, get_dataloader
 from model import SolvEncoder, SolvContrastive
 from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import load_model_state
@@ -27,9 +27,9 @@ def parse_args():
     parser.add_argument('--device', default='auto')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--max_pairs_per_anchor', type=int, default=2)
-    parser.add_argument('--feat_dim', type=int, default=10)
-    parser.add_argument('--feature_mode', default='element',
-                        choices=['element', 'element_shell'])
+    parser.add_argument('--feat_dim', type=int, default=len(ELEMENTS))
+    parser.add_argument('--feature_mode', default='atom_phys_shell',
+                        choices=['element', 'element_shell', 'atom_phys', 'atom_phys_shell'])
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
@@ -55,6 +55,8 @@ def main():
         center_on_li=args.center_on_li,
         shell_radius=args.shell_radius,
     )
+    if args.feature_mode.startswith('atom_phys') and args.feat_dim == len(ELEMENTS):
+        args.feat_dim = len(ELEMENTS) + ATOM_PROPERTY_DIM
     dl = get_dataloader(args.data_dir,
                         batch_size=args.batch_size,
                         num_workers=args.num_workers,

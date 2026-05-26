@@ -63,7 +63,7 @@ def main():
         '--out_dir', str(metrics_dir),
         '--seed', str(args.seed),
         '--device', args.device,
-        '--feature_mode', 'element_shell',
+        '--feature_mode', 'atom_phys_shell',
         '--center_on_li',
     ]
     if args.downstream_csv and args.downstream_target:
@@ -84,7 +84,7 @@ def main():
         '--out_dir', str(embeddings_dir),
         '--seed', str(args.seed),
         '--device', args.device,
-        '--feature_mode', 'element_shell',
+        '--feature_mode', 'atom_phys_shell',
         '--center_on_li',
     ]
     commands.append(export_cmd)

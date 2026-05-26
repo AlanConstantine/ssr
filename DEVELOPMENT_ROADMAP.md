@@ -12,15 +12,16 @@
 
 阶段 1B 的 temporal positive 已以保守方式落地：
 
-- 解析 trajectory id 和 frame index。
-- 同一 trajectory 的有限时间窗口内帧作为 positive。
+- 解析 trajectory id、中心 Li id 和 frame index。
+- 同一 trajectory、同一中心 Li id 的有限时间窗口内帧作为 positive。
 - 远时间片或不同 trajectory 作为 negative。
 - negative 优先限制在相同 signature 内，降低 composition shortcut 风险。
-- `temporal` mode 要求显式 trajectory/frame 元数据，避免误把独立结构文件当作时间序列。
+- `temporal` mode 要求显式 trajectory/center Li/frame 元数据，避免误把独立结构文件或同轨迹不同 Li 中心当作同一时间序列。
 
 阶段 3 的 xyz 可计算部分也已经落地：
 
 - `element_shell` 特征模式：元素 one-hot + Li 标记 + 最近 Li 距离 + 第一壳层标记。
+- `atom_phys_shell` 特征模式：常见电解液元素 one-hot + 原子序数、质量、电负性、共价/范德华半径、族、周期、价电子 + Li 壳层特征。
 - `center_on_li`：以 Li 质心为中心平移坐标。
 - `shell_radius`：可选 Li-centered crop。
 - `compute_physical_descriptors.py`：导出配位数和 Li 距离统计。
@@ -124,7 +125,7 @@
 
 开发任务：
 
-- [x] 从文件名或元数据中解析 trajectory id 和 frame index。
+- [x] 从文件名或元数据中解析 trajectory id、中心 Li id 和 frame index。
 - [x] 定义时间窗口，例如 `|t1 - t2| <= k` 为 positive。
 - [x] 远时间片或不同 trajectory 作为 negative。
 - [x] 支持 hard negative：组成相同但时间/结构状态不同。
@@ -194,6 +195,7 @@
 
 - [ ] 增加 atom-level 特征：
   - 元素 one-hot
+  - 元素物理性质编码
   - force-field atom type
   - partial charge
   - molecule type
