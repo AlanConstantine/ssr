@@ -8,7 +8,15 @@
 - 阶段 1A：已新增同结构增强视图、`SimCLRDataset` 和标准 SimCLR loss。
 - 阶段 2：已接入 `pair` / `simclr` dataset mode，以及 `nt_xent`、`simclr`、`bce_similarity`、`triplet_margin` loss 选择。
 
-尚未完成的是阶段 1B 的 temporal positive、阶段 1C 的 physical positive、hard negative mining 的高级策略，以及阶段 4 之后的系统评估。
+尚未完成的是阶段 1C 的 physical positive、hard negative mining 的高级策略，以及阶段 4 之后的系统评估。
+
+阶段 1B 的 temporal positive 已以保守方式落地：
+
+- 解析 trajectory id 和 frame index。
+- 同一 trajectory 的有限时间窗口内帧作为 positive。
+- 远时间片或不同 trajectory 作为 negative。
+- negative 优先限制在相同 signature 内，降低 composition shortcut 风险。
+- `temporal` mode 要求显式 trajectory/frame 元数据，避免误把独立结构文件当作时间序列。
 
 阶段 3 的 xyz 可计算部分也已经落地：
 
@@ -116,10 +124,10 @@
 
 开发任务：
 
-- [ ] 从文件名或元数据中解析 trajectory id 和 frame index。
-- [ ] 定义时间窗口，例如 `|t1 - t2| <= k` 为 positive。
-- [ ] 远时间片或不同 trajectory 作为 negative。
-- [ ] 支持 hard negative：组成相同但时间/结构状态不同。
+- [x] 从文件名或元数据中解析 trajectory id 和 frame index。
+- [x] 定义时间窗口，例如 `|t1 - t2| <= k` 为 positive。
+- [x] 远时间片或不同 trajectory 作为 negative。
+- [x] 支持 hard negative：组成相同但时间/结构状态不同。
 
 验收标准：
 

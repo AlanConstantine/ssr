@@ -11,6 +11,7 @@ label = 1 for positive, 0 for negative.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 import re
 import random
 from pathlib import Path
@@ -24,6 +25,13 @@ from utils import seed_worker
 # ------------------------------------------------------------------ #
 # Helper: periodic table → one-hot index
 ELEMENTS = ['H', 'C', 'N', 'O', 'F', 'Li', 'P', 'S', 'Cl', 'Br']
+
+
+@dataclass(frozen=True)
+class TemporalMetadata:
+    trajectory_id: str
+    frame_index: int
+    signature: str
 
 
 def element_one_hot(symbol: str) -> torch.Tensor:
@@ -219,6 +227,100 @@ class SimCLRDataset(Dataset):
         return view_a, view_b
 
 
+class TemporalDataset(Dataset):
+    """
+    Builds trajectory-aware pairs.
+
+    Positive pairs are nearby frames from the same trajectory. Negatives are
+    preferentially distant frames with the same signature, then frames from
+    other trajectories. This avoids using composition as an easy shortcut when
+    the data provides same-composition temporal alternatives.
+    """
+    def __init__(
+        self,
+        data_dir: Path,
+        feat_fn: Optional[Callable[[str], torch.Tensor]] = None,
+        physical_config: Optional[PhysicalFeatureConfig] = None,
+        positive_window: int = 5,
+        min_lag: int = 1,
+        negative_min_gap: int = 50,
+        same_signature_negatives: bool = True,
+        seed: int = 42,
+    ):
+        if positive_window < min_lag:
+            raise ValueError('positive_window must be >= min_lag')
+        if min_lag < 1:
+            raise ValueError('min_lag must be >= 1 to avoid self-pairs')
+        if negative_min_gap <= positive_window:
+            raise ValueError('negative_min_gap must be larger than positive_window')
+
+        self.data_dir, self.paths = _discover_xyz_paths(data_dir)
+        self.feat_fn = feat_fn
+        self.physical_config = physical_config or PhysicalFeatureConfig()
+        self.positive_window = positive_window
+        self.min_lag = min_lag
+        self.negative_min_gap = negative_min_gap
+        self.same_signature_negatives = same_signature_negatives
+        self.rng = random.Random(seed)
+
+        self.metadata = [parse_temporal_metadata(path) for path in self.paths]
+        self.traj2idx: Dict[str, List[int]] = {}
+        for idx, meta in enumerate(self.metadata):
+            self.traj2idx.setdefault(meta.trajectory_id, []).append(idx)
+        for indices in self.traj2idx.values():
+            indices.sort(key=lambda i: self.metadata[i].frame_index)
+
+        self.positive_candidates: Dict[int, List[int]] = {}
+        self.negative_candidates: Dict[int, List[int]] = {}
+        for idx, meta in enumerate(self.metadata):
+            positives = []
+            negatives = []
+            for other_idx, other_meta in enumerate(self.metadata):
+                if other_idx == idx:
+                    continue
+                same_traj = other_meta.trajectory_id == meta.trajectory_id
+                frame_gap = abs(other_meta.frame_index - meta.frame_index)
+                if same_traj and self.min_lag <= frame_gap <= self.positive_window:
+                    positives.append(other_idx)
+                elif same_traj and frame_gap >= self.negative_min_gap:
+                    negatives.append(other_idx)
+                elif not same_traj:
+                    negatives.append(other_idx)
+
+            if self.same_signature_negatives:
+                same_sig = [i for i in negatives if self.metadata[i].signature == meta.signature]
+                if same_sig:
+                    negatives = same_sig
+
+            if not positives:
+                raise ValueError(
+                    f'no temporal positive candidates for {self.paths[idx].name}; '
+                    f'check trajectory ids, frame indices, and positive_window'
+                )
+            if not negatives:
+                raise ValueError(
+                    f'no temporal negative candidates for {self.paths[idx].name}; '
+                    f'increase data diversity or lower negative_min_gap'
+                )
+            self.positive_candidates[idx] = positives
+            self.negative_candidates[idx] = negatives
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __getitem__(self, idx: int) -> Tuple[SolvationStructure, SolvationStructure, torch.Tensor]:
+        if self.rng.random() < 0.5:
+            other_idx = self.rng.choice(self.positive_candidates[idx])
+            label = torch.tensor(1.0)
+        else:
+            other_idx = self.rng.choice(self.negative_candidates[idx])
+            label = torch.tensor(0.0)
+
+        anchor = SolvationStructure(self.paths[idx], self.feat_fn, self.physical_config)
+        other = SolvationStructure(self.paths[other_idx], self.feat_fn, self.physical_config)
+        return anchor, other, label
+
+
 def _discover_xyz_paths(data_dir: Path) -> tuple[Path, list[Path]]:
     data_dir = Path(data_dir)
     if not data_dir.exists():
@@ -227,6 +329,46 @@ def _discover_xyz_paths(data_dir: Path) -> tuple[Path, list[Path]]:
     if not paths:
         raise ValueError(f'no .xyz files found in {data_dir}')
     return data_dir, paths
+
+
+def _read_xyz_comment(path: Path) -> str:
+    with open(path, 'r') as f:
+        f.readline()
+        return f.readline().strip()
+
+
+def parse_temporal_metadata(path: Path) -> TemporalMetadata:
+    comment = _read_xyz_comment(path)
+    name = path.stem
+    signature = ContrastiveDataset._signature_from_path(path)
+
+    trajectory_id = _find_named_value(comment, ('trajectory', 'traj', 'run', 'sim'))
+    if trajectory_id is None:
+        trajectory_id = _find_named_value(name, ('trajectory', 'traj', 'run', 'sim'))
+    if trajectory_id is None:
+        raise ValueError(
+            f'could not parse trajectory id from {path.name}; use filename tokens '
+            f'like TrajA_Frame100_... or xyz comment fields like "trajectory: TrajA frame: 100"'
+        )
+
+    frame_value = _find_named_value(comment, ('frame', 'step', 'timestep'))
+    if frame_value is None:
+        frame_value = _find_named_value(name, ('frame', 'step', 'timestep'))
+    if frame_value is None or not str(frame_value).isdigit():
+        raise ValueError(
+            f'could not parse frame index from {path.name}; use Frame100, step100, '
+            f'or xyz comment fields like "frame: 100"'
+        )
+    return TemporalMetadata(trajectory_id=str(trajectory_id), frame_index=int(frame_value), signature=signature)
+
+
+def _find_named_value(text: str, names: Sequence[str]) -> Optional[str]:
+    for name in names:
+        pattern = rf'(?:^|[^A-Za-z0-9]){name}[\s_:=.-]*([A-Za-z0-9]+)'
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _view_from_structure(
@@ -279,6 +421,10 @@ def get_dataloader(data_dir: str,
                    world_size: Optional[int] = None,
                    drop_last: bool = False,
                    seed: int = 42,
+                   temporal_positive_window: int = 5,
+                   temporal_min_lag: int = 1,
+                   temporal_negative_min_gap: int = 50,
+                   temporal_same_signature_negatives: bool = True,
                    ) -> DataLoader:
     if mode == 'pair':
         ds = ContrastiveDataset(Path(data_dir), max_neg, feat_fn,
@@ -290,6 +436,16 @@ def get_dataloader(data_dir: str,
                            augment_config=augment_config,
                            physical_config=physical_config)
         collate_fn = _simclr_collate_fn
+    elif mode == 'temporal':
+        ds = TemporalDataset(Path(data_dir),
+                             feat_fn=feat_fn,
+                             physical_config=physical_config,
+                             positive_window=temporal_positive_window,
+                             min_lag=temporal_min_lag,
+                             negative_min_gap=temporal_negative_min_gap,
+                             same_signature_negatives=temporal_same_signature_negatives,
+                             seed=seed)
+        collate_fn = _collate_fn
     else:
         raise ValueError(f'unsupported dataloader mode: {mode}')
 

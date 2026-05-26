@@ -65,6 +65,10 @@ def parse_args():
     parser.add_argument('--augment_noise_std', type=float, default=0.01)
     parser.add_argument('--augment_translation_std', type=float, default=0.0)
     parser.add_argument('--augment_atom_dropout', type=float, default=0.0)
+    parser.add_argument('--temporal_positive_window', type=int, default=5)
+    parser.add_argument('--temporal_min_lag', type=int, default=1)
+    parser.add_argument('--temporal_negative_min_gap', type=int, default=50)
+    parser.add_argument('--temporal_allow_cross_signature_negatives', action='store_true')
     parser.add_argument('--device', default='auto',
                         choices=['auto', 'cpu', 'cuda', 'cuda:0', 'cuda:1'])
     parser.add_argument('--local_rank', type=int, default=-1)   # DDP
@@ -77,10 +81,12 @@ def parse_args():
 # ------------------------------------------------------------------ #
 def main():
     args = parse_args()
-    if args.mode in {'temporal', 'physical'}:
+    if args.mode == 'physical':
         raise NotImplementedError(f'{args.mode} mode is planned but not implemented yet')
     if args.mode == 'simclr' and args.loss not in {'simclr', 'nt_xent'}:
         raise ValueError('simclr mode supports simclr/nt_xent loss')
+    if args.mode == 'temporal' and args.loss == 'simclr':
+        raise ValueError('temporal mode produces labeled pairs; use nt_xent, bce_similarity, or triplet_margin')
 
     set_seed(args.seed)
     log_dir = Path(args.log_dir)
@@ -123,7 +129,11 @@ def main():
                         rank=dist.get_rank() if distributed else None,
                         world_size=dist.get_world_size() if distributed else None,
                         drop_last=distributed or args.mode == 'simclr',
-                        seed=args.seed)
+                        seed=args.seed,
+                        temporal_positive_window=args.temporal_positive_window,
+                        temporal_min_lag=args.temporal_min_lag,
+                        temporal_negative_min_gap=args.temporal_negative_min_gap,
+                        temporal_same_signature_negatives=not args.temporal_allow_cross_signature_negatives)
     # ---------------------------------------------------------------- #
     # Model
     model_feat_dim = feature_dim_for_mode(args.feat_dim, args.feature_mode)
@@ -153,7 +163,7 @@ def main():
         running = 0.0
         pbar = tqdm(dl, desc=f'Epoch {epoch}', disable=not is_main)
         for batch in pbar:
-            if args.mode == 'pair':
+            if args.mode in {'pair', 'temporal'}:
                 feats_a = batch['a_feats'].to(device).float()
                 coords_a = batch['a_coords'].to(device).float()
                 mask_a = batch['a_mask'].to(device)

@@ -7,7 +7,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from augment import AugmentConfig, augment_structure
-from dataloader import build_fixed_pair_list, get_dataloader
+from dataloader import build_fixed_pair_list, get_dataloader, parse_temporal_metadata
 from evaluation import acsf_like_descriptor, rdf_descriptor, shell_composition
 from model import SolvContrastive, SolvEncoder, simclr_nt_xent
 from physics import PhysicalFeatureConfig, append_shell_features, feature_dim_for_mode
@@ -18,6 +18,18 @@ def write_xyz(path: Path, signature: str) -> None:
         "\n".join([
             "3",
             f"signature: {signature}",
+            "Li 0.0 0.0 0.0",
+            "O 1.0 0.0 0.0",
+            "C 0.0 1.0 0.0",
+        ])
+    )
+
+
+def write_temporal_xyz(path: Path, signature: str, trajectory: str, frame: int) -> None:
+    path.write_text(
+        "\n".join([
+            "3",
+            f"signature: {signature} trajectory: {trajectory} frame: {frame}",
             "Li 0.0 0.0 0.0",
             "O 1.0 0.0 0.0",
             "C 0.0 1.0 0.0",
@@ -50,6 +62,33 @@ def test_pair_and_simclr_dataloaders(tmp_path):
     )
     shell_batch = next(iter(shell_dl))
     assert shell_batch["view1_feats"].shape[-1] == feature_dim_for_mode(10, "element_shell")
+
+
+def test_temporal_metadata_and_dataloader(tmp_path):
+    write_temporal_xyz(tmp_path / "TrajA_Frame0_Li_1DMC_id0.xyz", "Li_1DMC", "A", 0)
+    write_temporal_xyz(tmp_path / "TrajA_Frame2_Li_1DMC_id1.xyz", "Li_1DMC", "A", 2)
+    write_temporal_xyz(tmp_path / "TrajA_Frame18_Li_1DMC_id2.xyz", "Li_1DMC", "A", 18)
+    write_temporal_xyz(tmp_path / "TrajA_Frame20_Li_1DMC_id3.xyz", "Li_1DMC", "A", 20)
+    write_temporal_xyz(tmp_path / "TrajB_Frame0_Li_1DMC_id4.xyz", "Li_1DMC", "B", 0)
+    write_temporal_xyz(tmp_path / "TrajB_Frame2_Li_1DMC_id5.xyz", "Li_1DMC", "B", 2)
+
+    meta = parse_temporal_metadata(tmp_path / "TrajA_Frame20_Li_1DMC_id3.xyz")
+    assert meta.trajectory_id == "A"
+    assert meta.frame_index == 20
+    assert meta.signature == "Li_1DMC"
+
+    temporal_dl = get_dataloader(
+        str(tmp_path),
+        batch_size=2,
+        mode="temporal",
+        num_workers=0,
+        temporal_positive_window=3,
+        temporal_negative_min_gap=10,
+    )
+    batch = next(iter(temporal_dl))
+    assert batch["a_feats"].shape[-1] == 10
+    assert "labels" in batch
+    assert set(batch["labels"].tolist()).issubset({0.0, 1.0})
 
 
 def test_model_and_simclr_loss():

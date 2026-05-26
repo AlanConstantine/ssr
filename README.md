@@ -20,7 +20,7 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 
 - `augment.py`：结构增强，包括随机旋转、平移、坐标噪声和 atom dropout。
 - `physics.py`：从 xyz 坐标计算 Li 壳层、配位和距离相关物理先验。
-- `dataloader.py`：读取 `.xyz` 文件，支持 `pair` 和 `simclr` 数据模式。
+- `dataloader.py`：读取 `.xyz` 文件，支持 `pair`、`simclr` 和 `temporal` 数据模式。
 - `model.py`：定义 encoder、投影头和多种 contrastive loss。
 - `utils.py`：seed、配置、checkpoint、环境信息工具。
 - `egnn_torch_c.py`：本项目使用的 EGNN 实现。
@@ -106,6 +106,46 @@ python train.py \
   --mode pair \
   --loss bce_similarity
 ```
+
+时间邻近训练：
+
+```bash
+python train.py \
+  --data_dir /path/to/xyz_data \
+  --log_dir ./runs/ssr_temporal \
+  --mode temporal \
+  --loss bce_similarity \
+  --temporal_positive_window 5 \
+  --temporal_negative_min_gap 50 \
+  --feature_mode element_shell \
+  --center_on_li
+```
+
+`temporal` mode 要求每个 `.xyz` 能解析出 trajectory id 和 frame index。推荐在第二行 metadata 中显式写入：
+
+```text
+signature: Li_2DMC_2EC_2EMC trajectory: TrajA frame: 100
+```
+
+或在文件名中使用：
+
+```text
+TrajA_Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
+```
+
+temporal positive 定义为同一 trajectory 内满足：
+
+```text
+temporal_min_lag <= |frame_i - frame_j| <= temporal_positive_window
+```
+
+negative 优先从同 signature 的远时间片中采样：
+
+```text
+|frame_i - frame_j| >= temporal_negative_min_gap
+```
+
+如果同 signature 远时间片不存在，则退到不同 trajectory 的样本。这样可以降低模型只学习 composition/signature 差异的风险。
 
 训练会保存：
 
@@ -299,7 +339,7 @@ scripts/run_local_checks.sh
 
 ## 当前限制
 
-- 默认 SimCLR positive 已升级为同结构增强视图；但时间邻近和物理相似性 positive 仍未实现。
+- 默认 SimCLR positive 已升级为同结构增强视图；时间邻近 positive 已实现为 `temporal` mode；物理相似性 positive 仍未实现。
 - `pair` mode 中正负样本仍由 signature 定义，可能更偏向组成分类。
 - 已加入 xyz 可计算的 Li 壳层特征；周期性边界条件、分子身份、部分电荷、显式拓扑边仍需要额外数据。
 - 已有最小 smoke tests，但仍缺少完整单元测试和真实数据回归测试。

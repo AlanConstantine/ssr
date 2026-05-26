@@ -18,3 +18,7 @@ num_nearest_neighbors: 12
 augment_noise_std: 0.01
 augment_translation_std: 0.0
 augment_atom_dropout: 0.0
+temporal_positive_window: 5
+temporal_min_lag: 1
+temporal_negative_min_gap: 50
+temporal_allow_cross_signature_negatives: false
