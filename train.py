@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--loss', default='simclr',
                         choices=['nt_xent', 'simclr', 'bce_similarity', 'triplet_margin'])
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--patience', type=int, default=10,

@@ -348,7 +348,7 @@ scripts/run_local_checks.sh
 
 ## 建议下一步
 
-1. 实现 temporal mode：同一轨迹短时间窗口作为 positive。
-2. 实现 physical mode：基于配位数/RDF/距离分布构造 soft positive。
-3. 增加下游验证任务，例如配位数预测、RDF 状态分类、扩散/电导相关指标预测。
-4. 建立 RDF/CN/SOAP/composition baseline。
+1. 实现 physical mode：基于配位数/RDF/距离分布构造 soft positive。
+2. 补充真实数据回归测试，覆盖 B/Si 和多中心 Li trajectory 数据。
+3. 增加真实下游验证任务，例如扩散/电导/粘度/迁移数预测。
+4. 补充真实 SOAP、非等变 GNN、SchNet/DimeNet/PaiNN 等 baseline。
