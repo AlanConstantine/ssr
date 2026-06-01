@@ -4,6 +4,8 @@
 
 SSR embeddings should be treated as local solvation-environment representations. They are most useful when they encode geometry, atom identity, local coordination, ion-pairing state, and shell composition in a way that can be compared across electrolyte formulations.
 
+This is consistent with electrolyte literature: Li-ion electrolyte behavior is often interpreted through solvation-shell composition, coordination, ion-pairing state, aggregate formation, viscosity, diffusion, and conductivity. Quantum-chemical studies also show that HOMO/LUMO levels are not purely isolated-molecule properties; they can be shifted or renormalized by Li coordination and the surrounding solvation shell.
+
 The right application pattern is two-level:
 
 ```text
@@ -31,6 +33,8 @@ Local structure embeddings can be used to predict properties computed for that s
 - shell composition class
 
 For HOMO/LUMO specifically, labels should come from a consistent quantum-chemistry workflow on the extracted local structure or a chemically well-defined cluster derived from it.
+
+This point matters chemically. HOMO/LUMO trends are often used to reason about oxidative and reductive stability, but solvent orbital levels can change when molecules are coordinated to Li+ or embedded in a solvation shell. Therefore a local-cluster label is better aligned with SSR than a free-molecule HOMO/LUMO label.
 
 Example label table:
 
@@ -136,6 +140,8 @@ High-confidence formulation targets:
 - anion diffusion coefficient
 - Li transference number
 - ion-pair / aggregate fraction
+
+These targets are close to the microscopic information represented by SSR. Concentrated electrolyte literature distinguishes SSIP, CIP, and aggregate states, and links solvation/association structure to transport mechanisms, effective ion size, viscosity, and diffusion.
 
 More difficult cell-level targets:
 
@@ -269,3 +275,15 @@ pooled SSR embedding distribution + composition + condition -> conductivity / vi
 ```
 
 If SSR improves held-out formulation prediction over composition-only and RDF/CN-only baselines, then the embedding is useful beyond a single electrolyte formula.
+
+## Literature Support
+
+The following references motivate the two-level SSR application workflow:
+
+- Ion-solvent chemistry reviews discuss how Li+ solvation shells and multi-solvent complexes affect electrolyte redox stability, including HOMO/LUMO shifts of coordinated solvents: https://www.sciencedirect.com/science/article/pii/S2667325821001011
+- Reviews of electrode-electrolyte interphase chemistry connect electrolyte HOMO/LUMO levels, Li+ solvation complexes, and reduction/oxidation behavior: https://pmc.ncbi.nlm.nih.gov/articles/PMC7500179/
+- Work on electrolyte-renormalized oxidative stability argues that solvent HOMO levels are modified by the solvation environment, so isolated-molecule descriptors can be insufficient: https://www.osti.gov/pages/biblio/1799381
+- Concentration-dependent electrolyte reviews summarize how SSIP, CIP, and aggregate formation change local solvation structure, effective ion size, viscosity, diffusion, and transport mechanisms: https://pmc.ncbi.nlm.nih.gov/articles/PMC9448741/
+- Functional electrolyte additive reviews note that practical electrolyte design involves solvation structure, ionic conductivity, transference number, viscosity, and HOMO/LUMO-related reactivity: https://pmc.ncbi.nlm.nih.gov/articles/PMC12393036/
+- Recent formulation-level machine-learning models predict liquid electrolyte properties from ionic conductivity to solvation structure while respecting mixture permutation invariance and condition dependence: https://arxiv.org/abs/2504.18728
+- Multiscale electrolyte-design reviews connect DFT, MD, AIMD, and machine-learning simulations to solvation energy, coordination, redox stability, ion transport kinetics, viscosity, diffusion, and conductivity: https://www.sciencedirect.com/science/article/pii/S2405829726000607

@@ -16,6 +16,8 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 
 更完整的技术评估见 [TECHNICAL_ROUTE_ASSESSMENT.md](TECHNICAL_ROUTE_ASSESSMENT.md)，代码层面的改进记录见 [IMPROVEMENT_SUGGESTIONS.md](IMPROVEMENT_SUGGESTIONS.md)。
 
+跨配方 embedding 的下游任务设计见 [SSR_APPLICATION_WORKFLOW.md](SSR_APPLICATION_WORKFLOW.md)，包括局部 HOMO/LUMO 等结构性质预测和配方级电导率、粘度、扩散、迁移数等性质预测。
+
 ## 文件结构
 
 - `augment.py`：结构增强，包括随机旋转、平移、坐标噪声和 atom dropout。
@@ -35,6 +37,7 @@ SSR 是一个用于溶剂化结构表征学习的研究原型。当前实现使�
 - `scripts/visualize_embeddings.py`：导出 PCA embedding scatter 和 similarity heatmap SVG。
 - `scripts/run_local_checks.sh`：本地编译和 smoke test 命令。
 - `scripts/make_tiny_xyz.py`：生成 CPU smoke test 用的小样本 xyz 数据。
+- `SSR_APPLICATION_WORKFLOW.md`：跨配方 SSR embedding 的局部性质预测和配方性质预测方案。
 - `tests/test_smoke.py`：最小 smoke tests。
 - `ratio_embedding/ratio_data_generation.ipynb`：ratio embedding 数据生成实验 notebook。
 
@@ -305,6 +308,17 @@ python scripts/export_embeddings.py \
 - `metadata.csv`
 - `embeddings.csv`
 - `metadata.json`
+
+`metadata.csv` 和 `embeddings.csv` 会包含 `path`、`formulation_id` 和 `signature`。对于不同配方目录中同名 `.xyz` 文件，建议在下游标签表中使用 `path` 做主键。
+
+## 下游任务
+
+SSR embedding 的推荐下游使用分两层：
+
+1. 局部溶剂化结构性质预测：用单个 Li-centered xyz 的 embedding 预测 HOMO、LUMO、gap、solvation energy、coordination number 或 ion-pairing state。
+2. 配方性质预测：对同一 `formulation_id` 下的多个局部 embedding 做 mean/std/quantile/cluster-fraction 聚合，再与配方组成、盐浓度、温度和分子描述符融合，预测 conductivity、viscosity、diffusion coefficient 或 Li transference number。
+
+更多数据格式、baseline、split 和参考文献见 [SSR_APPLICATION_WORKFLOW.md](SSR_APPLICATION_WORKFLOW.md)。
 
 ## 物理描述符
 
