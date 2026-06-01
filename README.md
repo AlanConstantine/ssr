@@ -54,7 +54,17 @@ conda install -c conda-forge rdkit
 
 ## 数据格式
 
-训练数据目录应包含 `.xyz` 文件。文件名需要包含 signature，例如：
+训练数据目录可以直接包含 `.xyz` 文件，也可以按电解液配方 id 分目录递归组织。推荐后者：
+
+```text
+data/
+  formula_001/
+    Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
+  formula_002/
+    Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
+```
+
+不同配方目录中允许出现相同 `.xyz` 文件名；代码会使用完整路径区分样本，并在导出的 metadata 中记录 `formulation_id`。文件名需要包含 signature，例如：
 
 ```text
 Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
@@ -122,7 +132,7 @@ python train.py \
   --center_on_li
 ```
 
-`temporal` mode 要求每个 `.xyz` 能解析出 trajectory id、中心 Li id 和 frame index。推荐在第二行 metadata 中显式写入：
+`temporal` mode 要求每个 `.xyz` 能解析出 formulation id、trajectory id、中心 Li id 和 frame index。`formulation_id` 默认来自 `.xyz` 所在的配方目录名。推荐在第二行 metadata 中显式写入：
 
 ```text
 signature: Li_2DMC_2EC_2EMC trajectory: TrajA center_id: 1030 frame: 100
@@ -134,7 +144,7 @@ signature: Li_2DMC_2EC_2EMC trajectory: TrajA center_id: 1030 frame: 100
 TrajA_Frame100_Li_2DMC_2EC_2EMC_id1030.xyz
 ```
 
-其中 `id1030` 表示中心 Li 离子的 id。temporal positive 定义为同一 trajectory、同一中心 Li id 内满足：
+其中 `id1030` 表示中心 Li 离子的 id。temporal positive 定义为同一 formulation、同一 trajectory、同一中心 Li id 内满足：
 
 ```text
 temporal_min_lag <= |frame_i - frame_j| <= temporal_positive_window

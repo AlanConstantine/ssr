@@ -33,6 +33,9 @@ def parse_args():
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
+    parser.add_argument('--dim', type=int, default=128)
+    parser.add_argument('--depth', type=int, default=4)
+    parser.add_argument('--num_nearest_neighbors', type=int, default=12)
     return parser.parse_args()
 
 
@@ -66,8 +69,8 @@ def main():
                         seed=args.seed)
 
     encoder = SolvEncoder(feat_dim=feature_dim_for_mode(args.feat_dim, args.feature_mode),
-                          dim=128, depth=4, num_nearest_neighbors=12)
-    model = SolvContrastive(encoder, dim=128, proj_dim=128)
+                          dim=args.dim, depth=args.depth, num_nearest_neighbors=args.num_nearest_neighbors)
+    model = SolvContrastive(encoder, dim=args.dim, proj_dim=args.dim)
     model.load_state_dict(load_model_state(args.ckpt, map_location='cpu'))
     model.to(device)
     model.eval()

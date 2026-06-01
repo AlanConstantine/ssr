@@ -22,7 +22,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.pipeline import make_pipeline
 
-from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, SolvationStructure, _collate_fn, build_fixed_pair_list, get_dataloader
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, SolvationStructure, _collate_fn, build_fixed_pair_list, get_dataloader, infer_formulation_id
 from model import SolvContrastive, SolvEncoder
 from physics import PhysicalFeatureConfig, feature_dim_for_mode, nearest_li_distance
 from utils import load_model_state, set_seed
@@ -90,7 +90,7 @@ def acsf_like_descriptor(
     max_distance: float = 6.0,
 ) -> np.ndarray:
     """Small dependency-free radial descriptor used as an ACSF/SOAP-class baseline."""
-    elements = ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br']
+    elements = [element for element in ELEMENTS if element != 'Li']
     min_dist = nearest_li_distance(struct.coords, struct.symbols)
     rows = []
     for element in elements:
@@ -132,9 +132,11 @@ def load_metadata_and_descriptors(
     acsf_rows = []
     shell_labels = []
     paths = []
+    formulations = []
     for path, signature in zip(ds.paths, ds.signatures):
         struct = SolvationStructure(path)
         paths.append(str(path))
+        formulations.append(infer_formulation_id(path))
         signatures.append(signature)
         cn_value = compute_coordination_number(struct, li_cutoff)
         shell = shell_composition(struct, li_cutoff)
@@ -148,6 +150,7 @@ def load_metadata_and_descriptors(
     shell_mat, shell_keys = matrix_from_dicts(shell_rows)
     return {
         'paths': paths,
+        'formulation_ids': np.asarray(formulations),
         'signatures': np.asarray(signatures),
         'coordination': np.asarray(cn, dtype=np.float32),
         'composition': comp,
@@ -324,7 +327,8 @@ def align_downstream(meta: dict[str, Any], path: str, target: str) -> tuple[np.n
     for idx, sample_path in enumerate(meta['paths']):
         filename = Path(sample_path).name
         signature = str(meta['signatures'][idx])
-        for key in (sample_path, filename, signature):
+        formulation_id = str(meta['formulation_ids'][idx])
+        for key in (sample_path, filename, formulation_id, signature):
             if key in values:
                 keep.append(idx)
                 y.append(values[key])

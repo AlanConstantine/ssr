@@ -56,6 +56,7 @@ ATOM_PROPERTY_DIM = 8
 
 @dataclass(frozen=True)
 class TemporalMetadata:
+    formulation_id: str
     trajectory_id: str
     center_id: str
     temporal_id: str
@@ -111,7 +112,11 @@ class SolvationStructure:
         self.coords: torch.Tensor
         self.symbols: List[str]
         self.signature: str
+        self.formulation_id: str
+        self.sample_id: str
         self.features: torch.Tensor
+        self.formulation_id = infer_formulation_id(self.path)
+        self.sample_id = str(self.path)
         default_feat_fn = atom_identity_and_property_features if self.physical_config.mode.startswith('atom_phys') else element_one_hot
         self._load(feat_fn or default_feat_fn)
 
@@ -123,8 +128,7 @@ class SolvationStructure:
         if len(lines) < 3:
             raise ValueError(f'{self.path} is not a valid xyz file: expected header and atom rows')
 
-        # 2nd line → signature
-        self.signature = lines[1].split(':')[-1].split('.')[0].strip()
+        self.signature = parse_signature(lines[1], self.path)
 
         # skip first two lines
         coords, symbols, feats = [], [], []
@@ -199,9 +203,7 @@ class ContrastiveDataset(Dataset):
     @staticmethod
     def _signature_from_path(p: Path) -> str:
         # Frame100_Li_2DMC_2EC_2EMC_id1030.xyz  → Li_2DMC_2EC_2EMC
-        name = p.stem
-        m = re.search(r'Li(?:_\d+[A-Z]+)+', name)
-        return m.group(0) if m else name
+        return parse_signature('', p)
 
     # -------------------------------------------------------------- #
     def __len__(self) -> int:
@@ -376,10 +378,26 @@ def _discover_xyz_paths(data_dir: Path) -> tuple[Path, list[Path]]:
     data_dir = Path(data_dir)
     if not data_dir.exists():
         raise FileNotFoundError(f'data_dir does not exist: {data_dir}')
-    paths = sorted(data_dir.glob('*.xyz'))
+    paths = sorted(data_dir.rglob('*.xyz'), key=lambda p: str(p.relative_to(data_dir)))
     if not paths:
         raise ValueError(f'no .xyz files found in {data_dir}')
     return data_dir, paths
+
+
+def parse_signature(comment: str, path: Path) -> str:
+    signature = _find_named_value(comment, ('signature', 'sig'))
+    if signature is not None:
+        return signature.split('.')[0].strip()
+    name = path.stem
+    m = re.search(r'Li(?:_\d+[A-Za-z]+)+', name)
+    return m.group(0) if m else name
+
+
+def infer_formulation_id(path: Path) -> str:
+    parent = path.parent
+    if parent.name.lower() in {'structures', 'structure', 'xyz', 'solvation_structures'} and parent.parent != parent:
+        return parent.parent.name
+    return parent.name
 
 
 def _read_xyz_comment(path: Path) -> str:
@@ -391,7 +409,8 @@ def _read_xyz_comment(path: Path) -> str:
 def parse_temporal_metadata(path: Path) -> TemporalMetadata:
     comment = _read_xyz_comment(path)
     name = path.stem
-    signature = ContrastiveDataset._signature_from_path(path)
+    formulation_id = infer_formulation_id(path)
+    signature = parse_signature(comment, path)
 
     trajectory_id = _find_named_value(comment, ('trajectory', 'traj', 'run', 'sim'))
     if trajectory_id is None:
@@ -421,9 +440,10 @@ def parse_temporal_metadata(path: Path) -> TemporalMetadata:
     trajectory_id = str(trajectory_id)
     center_id = str(center_id)
     return TemporalMetadata(
+        formulation_id=formulation_id,
         trajectory_id=trajectory_id,
         center_id=center_id,
-        temporal_id=f'{trajectory_id}:{center_id}',
+        temporal_id=f'{formulation_id}:{trajectory_id}:{center_id}',
         frame_index=int(frame_value),
         signature=signature,
     )
@@ -431,7 +451,7 @@ def parse_temporal_metadata(path: Path) -> TemporalMetadata:
 
 def _find_named_value(text: str, names: Sequence[str]) -> Optional[str]:
     for name in names:
-        pattern = rf'(?:^|[^A-Za-z0-9]){name}[\s_:=.-]*([A-Za-z0-9]+)'
+        pattern = rf'(?:^|[^A-Za-z0-9]){name}[\s_:=.-]*([A-Za-z0-9_+.-]+)'
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             return match.group(1)

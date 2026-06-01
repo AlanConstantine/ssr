@@ -11,7 +11,7 @@ import torch
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, _collate_fn
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, _collate_fn, infer_formulation_id
 from model import SolvContrastive, SolvEncoder
 from physics import PhysicalFeatureConfig, feature_dim_for_mode
 from utils import config_hash, git_commit_hash, load_model_state, set_seed
@@ -32,6 +32,9 @@ def parse_args():
     parser.add_argument('--li_cutoff', type=float, default=2.5)
     parser.add_argument('--center_on_li', action='store_true')
     parser.add_argument('--shell_radius', type=float, default=None)
+    parser.add_argument('--dim', type=int, default=128)
+    parser.add_argument('--depth', type=int, default=4)
+    parser.add_argument('--num_nearest_neighbors', type=int, default=12)
     return parser.parse_args()
 
 
@@ -60,8 +63,8 @@ def main():
     )
 
     encoder = SolvEncoder(feat_dim=feature_dim_for_mode(args.feat_dim, args.feature_mode),
-                          dim=128, depth=4, num_nearest_neighbors=12)
-    model = SolvContrastive(encoder, dim=128, proj_dim=128)
+                          dim=args.dim, depth=args.depth, num_nearest_neighbors=args.num_nearest_neighbors)
+    model = SolvContrastive(encoder, dim=args.dim, proj_dim=args.dim)
     model.load_state_dict(load_model_state(args.ckpt, map_location='cpu'))
     model.to(device)
     model.eval()
@@ -82,19 +85,19 @@ def main():
             mask = batch['a_mask'].to(device)
             z = model(feats, coords, mask)
             embeddings.append(z.cpu().numpy())
-            metadata.extend(zip([str(p) for p in paths], list(signatures)))
+            metadata.extend(zip([str(p) for p in paths], [infer_formulation_id(Path(p)) for p in paths], list(signatures)))
 
     arr = np.concatenate(embeddings, axis=0)
     np.save(out_dir / 'embeddings.npy', arr)
     with open(out_dir / 'metadata.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['path', 'signature'])
+        writer.writerow(['path', 'formulation_id', 'signature'])
         writer.writerows(metadata)
     with open(out_dir / 'embeddings.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['path', 'signature'] + [f'z{i}' for i in range(arr.shape[1])])
-        for (path, signature), row in zip(metadata, arr):
-            writer.writerow([path, signature] + [float(value) for value in row])
+        writer.writerow(['path', 'formulation_id', 'signature'] + [f'z{i}' for i in range(arr.shape[1])])
+        for (path, formulation_id, signature), row in zip(metadata, arr):
+            writer.writerow([path, formulation_id, signature] + [float(value) for value in row])
     export_config = vars(args).copy()
     with open(out_dir / 'metadata.json', 'w') as f:
         json.dump({

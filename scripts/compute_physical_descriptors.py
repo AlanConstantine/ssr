@@ -9,7 +9,7 @@ import torch
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from dataloader import ContrastiveDataset, SolvationStructure
+from dataloader import ContrastiveDataset, SolvationStructure, infer_formulation_id
 from physics import nearest_li_distance
 
 
@@ -33,6 +33,7 @@ def main():
         coordination = int((finite_non_li <= args.li_cutoff).sum().item())
         rows.append({
             'path': str(path),
+            'formulation_id': infer_formulation_id(path),
             'signature': signature,
             'num_atoms': len(struct.symbols),
             'num_li': sum(sym == 'Li' for sym in struct.symbols),

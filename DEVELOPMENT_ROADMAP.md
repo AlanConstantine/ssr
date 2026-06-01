@@ -12,11 +12,11 @@
 
 阶段 1B 的 temporal positive 已以保守方式落地：
 
-- 解析 trajectory id、中心 Li id 和 frame index。
-- 同一 trajectory、同一中心 Li id 的有限时间窗口内帧作为 positive。
+- 解析 formulation id、trajectory id、中心 Li id 和 frame index。
+- 同一 formulation、同一 trajectory、同一中心 Li id 的有限时间窗口内帧作为 positive。
 - 远时间片或不同 trajectory 作为 negative。
 - negative 优先限制在相同 signature 内，降低 composition shortcut 风险。
-- `temporal` mode 要求显式 trajectory/center Li/frame 元数据，避免误把独立结构文件或同轨迹不同 Li 中心当作同一时间序列。
+- `temporal` mode 要求显式 trajectory/center Li/frame 元数据，并从配方目录推断 formulation id，避免误把独立结构文件、同轨迹不同 Li 中心或不同配方下的同名文件当作同一时间序列。
 
 阶段 3 的 xyz 可计算部分也已经落地：
 

@@ -7,7 +7,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from augment import AugmentConfig, augment_structure
-from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, atom_identity_and_property_features, build_fixed_pair_list, get_dataloader, parse_temporal_metadata
+from dataloader import ATOM_PROPERTY_DIM, ELEMENTS, ContrastiveDataset, SolvationStructure, atom_identity_and_property_features, build_fixed_pair_list, get_dataloader, parse_temporal_metadata
 from evaluation import acsf_like_descriptor, rdf_descriptor, shell_composition
 from model import SolvContrastive, SolvEncoder, simclr_nt_xent
 from physics import PhysicalFeatureConfig, append_shell_features, feature_dim_for_mode
@@ -75,6 +75,21 @@ def test_pair_and_simclr_dataloaders(tmp_path):
     assert atom_phys_batch["view1_feats"].shape[-1] == feature_dim_for_mode(base_dim, "atom_phys_shell")
 
 
+def test_recursive_formula_directories_allow_duplicate_filenames(tmp_path):
+    for formula_id in ["F001", "F002"]:
+        formula_dir = tmp_path / formula_id
+        formula_dir.mkdir()
+        write_xyz(formula_dir / "Frame0_Li_1DMC_id1030.xyz", "Li_1DMC")
+        write_xyz(formula_dir / "Frame1_Li_1EC_id1030.xyz", "Li_1EC")
+
+    ds = ContrastiveDataset(tmp_path)
+    assert len(ds.paths) == 4
+    assert len({str(path) for path in ds.paths}) == 4
+    struct = SolvationStructure(tmp_path / "F001" / "Frame0_Li_1DMC_id1030.xyz")
+    assert struct.formulation_id == "F001"
+    assert struct.signature == "Li_1DMC"
+
+
 def test_temporal_metadata_and_dataloader(tmp_path):
     write_temporal_xyz(tmp_path / "TrajA_Frame0_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 0)
     write_temporal_xyz(tmp_path / "TrajA_Frame2_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 2)
@@ -86,7 +101,7 @@ def test_temporal_metadata_and_dataloader(tmp_path):
     meta = parse_temporal_metadata(tmp_path / "TrajA_Frame20_Li_1DMC_id1030.xyz")
     assert meta.trajectory_id == "A"
     assert meta.center_id == "1030"
-    assert meta.temporal_id == "A:1030"
+    assert meta.temporal_id == f"{tmp_path.name}:A:1030"
     assert meta.frame_index == 20
     assert meta.signature == "Li_1DMC"
 
@@ -102,6 +117,31 @@ def test_temporal_metadata_and_dataloader(tmp_path):
     assert batch["a_feats"].shape[-1] == len(ELEMENTS)
     assert "labels" in batch
     assert set(batch["labels"].tolist()).issubset({0.0, 1.0})
+
+
+def test_temporal_identity_includes_formula_directory(tmp_path):
+    for formula_id in ["F001", "F002"]:
+        formula_dir = tmp_path / formula_id
+        formula_dir.mkdir()
+        write_temporal_xyz(formula_dir / "TrajA_Frame0_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 0)
+        write_temporal_xyz(formula_dir / "TrajA_Frame2_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 2)
+        write_temporal_xyz(formula_dir / "TrajA_Frame18_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 18)
+        write_temporal_xyz(formula_dir / "TrajA_Frame20_Li_1DMC_id1030.xyz", "Li_1DMC", "A", 20)
+
+    meta = parse_temporal_metadata(tmp_path / "F001" / "TrajA_Frame0_Li_1DMC_id1030.xyz")
+    assert meta.formulation_id == "F001"
+    assert meta.temporal_id == "F001:A:1030"
+
+    temporal_dl = get_dataloader(
+        str(tmp_path),
+        batch_size=2,
+        mode="temporal",
+        num_workers=0,
+        temporal_positive_window=3,
+        temporal_negative_min_gap=10,
+    )
+    batch = next(iter(temporal_dl))
+    assert "labels" in batch
 
 
 def test_model_and_simclr_loss():
@@ -146,7 +186,7 @@ def test_stage4_descriptors(tmp_path):
     struct = SolvationStructure(path)
     assert shell_composition(struct, li_cutoff=2.5)["O"] == 1.0
     assert rdf_descriptor(struct, bins=4, max_distance=4.0).shape == (4,)
-    assert acsf_like_descriptor(struct, bins=4, max_distance=4.0).shape[0] == 36
+    assert acsf_like_descriptor(struct, bins=4, max_distance=4.0).shape[0] == (len(ELEMENTS) - 1) * 4
 
 
 def test_electrolyte_atom_features_include_boron_and_silicon():

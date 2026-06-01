@@ -32,6 +32,9 @@ def parse_args():
     parser.add_argument('--rdf_max_distance', type=float, default=6.0)
     parser.add_argument('--downstream_csv', default=None)
     parser.add_argument('--downstream_target', default=None)
+    parser.add_argument('--dim', type=int, default=128)
+    parser.add_argument('--depth', type=int, default=4)
+    parser.add_argument('--num_nearest_neighbors', type=int, default=12)
     parser.add_argument('--device', default='auto')
     return parser.parse_args()
 
@@ -52,6 +55,9 @@ def main():
         li_cutoff=args.li_cutoff,
         center_on_li=args.center_on_li,
         shell_radius=args.shell_radius,
+        dim=args.dim,
+        depth=args.depth,
+        num_nearest_neighbors=args.num_nearest_neighbors,
         rdf_bins=args.rdf_bins,
         rdf_max_distance=args.rdf_max_distance,
         downstream_csv=args.downstream_csv,
@@ -78,14 +84,14 @@ def main():
     meta = result['metadata']
     with open(out_dir / 'metadata.csv', 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['path', 'signature', 'coordination_number', 'shell_state'])
-        writer.writerows(zip(meta['paths'], meta['signatures'], meta['coordination'], meta['shell_state']))
+        writer.writerow(['path', 'formulation_id', 'signature', 'coordination_number', 'shell_state'])
+        writer.writerows(zip(meta['paths'], meta['formulation_ids'], meta['signatures'], meta['coordination'], meta['shell_state']))
     with open(out_dir / 'embeddings.csv', 'w', newline='') as f:
         writer = csv.writer(f)
         dim = result['embeddings'].shape[1]
-        writer.writerow(['path', 'signature'] + [f'z{i}' for i in range(dim)])
-        for path, signature, row in zip(meta['paths'], meta['signatures'], result['embeddings']):
-            writer.writerow([path, signature] + [float(value) for value in row])
+        writer.writerow(['path', 'formulation_id', 'signature'] + [f'z{i}' for i in range(dim)])
+        for path, formulation_id, signature, row in zip(meta['paths'], meta['formulation_ids'], meta['signatures'], result['embeddings']):
+            writer.writerow([path, formulation_id, signature] + [float(value) for value in row])
     np.save(out_dir / 'rdf_descriptors.npy', meta['rdf'])
     np.save(out_dir / 'acsf_like_descriptors.npy', meta['acsf_like'])
     with open(out_dir / 'descriptor_keys.json', 'w') as f:
